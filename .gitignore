@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# PyInstaller
+# smartpad.spec is committed intentionally when created in Phase 23
+*.spec
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs (user decides their own settings)
+.idea/
+.vscode/
+
+# Downloaded GGUF models (never commit — huge files)
+models/
+
+# Backups (generated at runtime)
+backups/
+
+# Recovery files (generated at runtime)
+*.recovery
+
+# mypy cache
+.mypy_cache/
+
+# pytest cache
+.pytest_cache/
+
+# ruff cache
+.ruff_cache/
+
+# Coverage
+.coverage
+htmlcov/

@@ -1,0 +1,30 @@
+name: Release
+
+# TODO (Phase 23): Implement full release build pipeline.
+# This file exists as a placeholder; the real implementation happens in Phase 23
+# of the build sequence (SPEC.md section 22).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  # TODO (Phase 23): Build artifacts for all platforms:
+  #   - smartpad-{version}-windows-x64-setup.exe
+  #   - smartpad-{version}-windows-x64-portable.zip
+  #   - smartpad-{version}-macos-universal.dmg
+  #   - smartpad-{version}-linux-x64.AppImage
+  #   - smartpad-{version}-linux-x64.deb
+  #
+  # Matrix: [windows-latest, macos-latest, macos-14 (Apple Silicon), ubuntu-latest]
+  # Tool: PyInstaller with platform-specific spec conditionals
+  # Upload: GitHub Release assets
+
+  placeholder:
+    name: Release placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: echo "Release build for ${{ github.ref_name }} — full implementation in Phase 23"
