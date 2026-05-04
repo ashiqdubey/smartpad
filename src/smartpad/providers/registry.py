@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from smartpad.providers.anthropic import AnthropicProvider
+from smartpad.providers.google import GoogleProvider
 from smartpad.providers.openai_compatible import OpenAICompatibleProvider
 
 if TYPE_CHECKING:
@@ -16,8 +18,8 @@ if TYPE_CHECKING:
 
 REGISTRY: dict[str, type] = {
     "OpenAICompatibleProvider": OpenAICompatibleProvider,
-    # Phase 17: "AnthropicProvider": AnthropicProvider,
-    # Phase 17: "GoogleProvider": GoogleProvider,
+    "AnthropicProvider": AnthropicProvider,
+    "GoogleProvider": GoogleProvider,
     # Phase 16: "ManagedLocalProvider": ManagedLocalProvider,
 }
 
