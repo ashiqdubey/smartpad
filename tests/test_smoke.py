@@ -79,9 +79,12 @@ def test_insert_and_read_message(tmp_path: Path) -> None:
         assert found.kind == "chat"
 
 
-def test_main_prints(capsys: pytest.CaptureFixture[str]) -> None:
-    from smartpad.__main__ import main
+def test_main_imports_run() -> None:
+    """__main__.main() delegates to app.run(); verify the import chain is intact."""
+    from unittest.mock import patch
 
-    main()
-    captured = capsys.readouterr()
-    assert "SmartPad starting..." in captured.out
+    # Patch app.run so the Qt event loop doesn't actually start.
+    with patch("smartpad.app.run") as mock_run:
+        from smartpad.__main__ import main
+        main()
+        mock_run.assert_called_once()

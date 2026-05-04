@@ -1,5 +1,10 @@
+"""Entry point — invoked by `python -m smartpad` or the `smartpad` script."""
+
+from smartpad.app import run
+
+
 def main() -> None:
-    print("SmartPad starting...")
+    run()
 
 
 if __name__ == "__main__":
