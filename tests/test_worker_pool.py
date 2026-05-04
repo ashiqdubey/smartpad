@@ -151,8 +151,12 @@ def test_worker_high_before_low() -> None:
             order.append(label)
         return label
 
-    # Submit LOW first, then HIGH — HIGH must win
+    # Enqueue BOTH jobs BEFORE starting the worker so the priority queue
+    # decides the order rather than the wall-clock race between enqueue and dequeue.
     q = _JobQueue()
+    q.put(Priority.LOW, tag("low"))
+    q.put(Priority.HIGH, tag("high"))
+
     done = threading.Event()
     seen: list[int] = [0]
 
@@ -163,9 +167,6 @@ def test_worker_high_before_low() -> None:
 
     worker = _AsyncWorker(q, on_result=on_result, on_error=on_result)
     worker.start()
-
-    q.put(Priority.LOW, tag("low"))
-    q.put(Priority.HIGH, tag("high"))
 
     done.wait(timeout=3.0)
     worker.stop()
