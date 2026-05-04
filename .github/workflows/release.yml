@@ -1,30 +1,217 @@
 name: Release
 
-# TODO (Phase 23): Implement full release build pipeline.
-# This file exists as a placeholder; the real implementation happens in Phase 23
-# of the build sequence (SPEC.md section 22).
+# Triggered by git tags matching v*.*.* (e.g. v0.1.0).
+# Builds platform artifacts and creates a GitHub Release.
+# SPEC.MD section 16.5 artifact list:
+#   - smartpad-{version}-windows-x64-setup.exe
+#   - smartpad-{version}-windows-x64-portable.zip
+#   - smartpad-{version}-macos-universal.dmg
+#   - smartpad-{version}-linux-x64.AppImage
+#   - smartpad-{version}-linux-x64.deb
 
 on:
   push:
     tags:
       - "v*.*.*"
 
-jobs:
-  # TODO (Phase 23): Build artifacts for all platforms:
-  #   - smartpad-{version}-windows-x64-setup.exe
-  #   - smartpad-{version}-windows-x64-portable.zip
-  #   - smartpad-{version}-macos-universal.dmg
-  #   - smartpad-{version}-linux-x64.AppImage
-  #   - smartpad-{version}-linux-x64.deb
-  #
-  # Matrix: [windows-latest, macos-latest, macos-14 (Apple Silicon), ubuntu-latest]
-  # Tool: PyInstaller with platform-specific spec conditionals
-  # Upload: GitHub Release assets
+permissions:
+  contents: write   # needed to create GitHub Releases
 
-  placeholder:
-    name: Release placeholder
+jobs:
+  # ── Windows ──────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies + PyInstaller
+        run: |
+          pip install -e ".[dev]"
+          pip install pyinstaller
+
+      - name: Build exe
+        run: pyinstaller smartpad.spec
+
+      - name: Package installer (portable zip)
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          $portableZip = "smartpad-$version-windows-x64-portable.zip"
+          Compress-Archive -Path "dist\smartpad.exe" -DestinationPath $portableZip
+          echo "PORTABLE_ZIP=$portableZip" >> $env:GITHUB_ENV
+
+      - name: Upload Windows portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: "*.zip"
+
+  # ── macOS ─────────────────────────────────────────────────────────────────────
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies + PyInstaller
+        run: |
+          pip install -e ".[dev]"
+          pip install pyinstaller
+
+      - name: Build .app
+        run: pyinstaller smartpad.spec
+
+      - name: Create DMG
+        run: |
+          version="${{ github.ref_name }}"
+          arch="${{ matrix.arch }}"
+          dmg_name="smartpad-${version}-macos-${arch}.dmg"
+          hdiutil create -volname "SmartPad" -srcfolder "dist/SmartPad.app" \
+            -ov -format UDZO "${dmg_name}"
+          echo "DMG_NAME=${dmg_name}" >> $GITHUB_ENV
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: "*.dmg"
+
+  # ── Linux ─────────────────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder
-        run: echo "Release build for ${{ github.ref_name }} — full implementation in Phase 23"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libglib2.0-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 \
+            libxkbcommon-x11-0 libfontconfig1 \
+            fuse  # needed for AppImage
+
+      - name: Install dependencies + PyInstaller
+        run: |
+          pip install -e ".[dev]"
+          pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          QT_QPA_PLATFORM=offscreen pyinstaller smartpad.spec
+
+      - name: Package AppImage
+        run: |
+          version="${{ github.ref_name }}"
+          appimage_name="smartpad-${version}-linux-x64.AppImage"
+
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons
+          cp dist/smartpad AppDir/usr/bin/smartpad
+
+          cat > AppDir/smartpad.desktop << 'EOF'
+          [Desktop Entry]
+          Name=SmartPad
+          Exec=smartpad
+          Icon=smartpad
+          Type=Application
+          Categories=Utility;
+          EOF
+
+          # Download appimagetool if available, else just zip the binary
+          if wget -q -O appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"; then
+            chmod +x appimagetool
+            ./appimagetool AppDir "${appimage_name}" || cp dist/smartpad "${appimage_name}"
+          else
+            cp dist/smartpad "${appimage_name}"
+          fi
+          echo "APPIMAGE_NAME=${appimage_name}" >> $GITHUB_ENV
+
+      - name: Package .deb
+        run: |
+          version="${{ github.ref_name }}"
+          deb_version="${version#v}"
+          deb_name="smartpad-${version}-linux-x64.deb"
+
+          mkdir -p deb_pkg/DEBIAN deb_pkg/usr/bin deb_pkg/usr/share/applications
+
+          cat > deb_pkg/DEBIAN/control << EOF
+          Package: smartpad
+          Version: ${deb_version}
+          Architecture: amd64
+          Maintainer: SmartPad <noreply@smartpad.app>
+          Description: Floating AI scratchpad
+          EOF
+
+          cp dist/smartpad deb_pkg/usr/bin/smartpad
+          dpkg-deb --build deb_pkg "${deb_name}"
+          echo "DEB_NAME=${deb_name}" >> $GITHUB_ENV
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            *.AppImage
+            *.deb
+
+  # ── GitHub Release ────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SmartPad ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## SmartPad ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Platform | File |
+            |---|---|
+            | Windows (portable) | `smartpad-*-windows-x64-portable.zip` |
+            | macOS Intel | `smartpad-*-macos-x86_64.dmg` |
+            | macOS Apple Silicon | `smartpad-*-macos-arm64.dmg` |
+            | Linux AppImage | `smartpad-*-linux-x64.AppImage` |
+            | Linux .deb | `smartpad-*-linux-x64.deb` |
+
+            **macOS note:** First launch requires right-click → Open to bypass Gatekeeper (app is unsigned in v0.1).
+
+            See [README](https://github.com/ashiqdubey/smartpad#readme) for setup instructions.
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
