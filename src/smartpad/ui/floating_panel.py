@@ -15,6 +15,10 @@ Phase 06 implements:
 - Status bar
 - Draggable header
 - Position/size saved to settings
+
+Phase 07 adds:
+- Proper typed bubble widgets (ChatBubble, NoteBubble, TaskBubble,
+  ReminderBubble, SnippetBubble, ErrorBubble) replacing _SimpleBubble
 """
 
 from __future__ import annotations
@@ -36,7 +40,6 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -51,6 +54,13 @@ from smartpad.config import SmartPadSettings, load_settings
 from smartpad.core.router import ActionKind, route
 from smartpad.core.worker_pool import WorkerPool
 from smartpad.providers.base import ChatChunk, ChatMessage
+from smartpad.ui.bubbles.chat_bubble import ChatBubble
+from smartpad.ui.bubbles.error_bubble import ErrorBubble
+from smartpad.ui.bubbles.note_bubble import NoteBubble
+from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
+from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
+from smartpad.ui.bubbles.task_bubble import TaskBubble
+from smartpad.ui.slash_menu import SlashMenu  # noqa: F401 — imported for side-effects / future use
 
 # Module-level settings singleton to avoid re-instantiation during GC
 _settings: SmartPadSettings | None = None
@@ -63,51 +73,8 @@ def _get_settings() -> SmartPadSettings:
     return _settings
 
 
-# ── Minimal bubble widget used in Phase 06 ────────────────────────────────────
-# Full bubble widgets arrive in Phase 07; for now every message is a text
-# label styled with one of the bubble QSS IDs.
-
-class _SimpleBubble(QFrame):
-    """A minimal bubble: coloured frame + wrapping label."""
-
-    def __init__(
-        self,
-        text: str,
-        object_name: str,
-        align_right: bool = False,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setObjectName(object_name)
-        self._align_right = align_right
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._label = QLabel(text)
-        self._label.setWordWrap(True)
-        self._label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        self._label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-
-        if align_right:
-            layout.addStretch()
-        layout.addWidget(self._label)
-        if not align_right:
-            layout.addStretch()
-
-    def set_text(self, text: str) -> None:
-        self._label.setText(text)
-
-    def append_text(self, delta: str) -> None:
-        self._label.setText(self._label.text() + delta)
-
-
 # ── Main panel ────────────────────────────────────────────────────────────────
+
 
 class FloatingPanel(QWidget):
     """Frameless floating panel — the primary SmartPad UI surface."""
@@ -117,7 +84,8 @@ class FloatingPanel(QWidget):
         self._pool = pool
         self._settings = _get_settings()
         self._drag_pos: QPoint | None = None
-        self._pending_jobs: dict[str, _SimpleBubble] = {}  # job_id → bubble
+        # job_id → ChatBubble (AI placeholder while streaming)
+        self._pending_jobs: dict[str, ChatBubble] = {}
         self._chat_history: list[ChatMessage] = []
 
         self._build_window()
@@ -172,9 +140,9 @@ class FloatingPanel(QWidget):
         layout.addWidget(close_btn)
 
         # Make the header draggable
-        header.mousePressEvent = self._header_mouse_press       # type: ignore[method-assign]
-        header.mouseMoveEvent = self._header_mouse_move         # type: ignore[method-assign]
-        header.mouseReleaseEvent = self._header_mouse_release   # type: ignore[method-assign]
+        header.mousePressEvent = self._header_mouse_press  # type: ignore[method-assign]
+        header.mouseMoveEvent = self._header_mouse_move  # type: ignore[method-assign]
+        header.mouseReleaseEvent = self._header_mouse_release  # type: ignore[method-assign]
 
         return header
 
@@ -182,12 +150,8 @@ class FloatingPanel(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setObjectName("ChatScrollArea")
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         self._chat_container = QWidget()
         self._chat_container.setObjectName("ChatContainer")
@@ -213,9 +177,7 @@ class FloatingPanel(QWidget):
         self._input.setObjectName("MessageInput")
         self._input.setPlaceholderText("Ask anything…")
         self._input.setFixedHeight(60)
-        self._input.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self._input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input.installEventFilter(self)
 
         send_btn = QPushButton("Send")
@@ -331,10 +293,7 @@ class FloatingPanel(QWidget):
                 return True
 
         # Click outside the panel → hide
-        if (
-            event.type() == QEvent.Type.MouseButtonPress
-            and self.isVisible()
-        ):
+        if event.type() == QEvent.Type.MouseButtonPress and self.isVisible():
             try:
                 gpos = event.globalPosition().toPoint()
                 if not self.geometry().contains(gpos):
@@ -348,7 +307,9 @@ class FloatingPanel(QWidget):
 
     def _header_mouse_press(self, event: Any) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
 
     def _header_mouse_move(self, event: Any) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
@@ -368,7 +329,7 @@ class FloatingPanel(QWidget):
         self._input.clear()
 
         # Show user bubble immediately (optimistic UI)
-        self._add_bubble(text, "BubbleUser", align_right=True)
+        self._add_widget(ChatBubble(role="user", text=text))
 
         # Route the text
         result = route(text)
@@ -379,30 +340,50 @@ class FloatingPanel(QWidget):
                 self._chat_history.append(ChatMessage(role="user", content=result.body))
                 self._start_chat(result.body)
             case ActionKind.SAVE_NOTE:
-                self._add_bubble(f"Note saved: {result.body}", "BubbleNote")
+                note = NoteBubble(
+                    content=result.body,
+                    original_content=result.body,
+                )
+                note.set_status("saved")
+                self._add_widget(note)
                 self._set_status("Note saved")
             case ActionKind.SAVE_TASK:
-                self._add_bubble(f"Task saved: {result.body}", "BubbleTask")
+                task = TaskBubble(
+                    task_id=str(uuid.uuid4()),
+                    content=result.body,
+                )
+                task.set_status("saved")
+                self._add_widget(task)
                 self._set_status("Task saved")
             case ActionKind.SAVE_REMINDER:
-                self._add_bubble(f"Reminder set: {result.body}", "BubbleReminder")
+                reminder = ReminderBubble(content=result.body)
+                reminder.set_status("saved")
+                self._add_widget(reminder)
                 self._set_status("Reminder set")
             case ActionKind.SAVE_SNIPPET:
-                self._add_bubble(result.body, "BubbleSnippet")
+                snippet = SnippetBubble(content=result.body)
+                snippet.set_status("saved")
+                self._add_widget(snippet)
                 self._set_status("Snippet saved")
             case ActionKind.APP_COMMAND:
                 app_action = result.metadata.get("app_action", "unknown")
-                self._add_bubble(
-                    f"Command: /{app_action} (not yet implemented)",
-                    "BubbleAI",
+                ai_bubble = ChatBubble(
+                    role="assistant",
+                    text=f"Command: /{app_action} (not yet implemented)",
                 )
+                ai_bubble.set_status("saved")
+                self._add_widget(ai_bubble)
             case ActionKind.QUERY_DB:
-                self._add_bubble(
-                    "Personal-data queries not yet connected to DB.",
-                    "BubbleAI",
+                ai_bubble = ChatBubble(
+                    role="assistant",
+                    text="Personal-data queries not yet connected to DB.",
                 )
+                ai_bubble.set_status("saved")
+                self._add_widget(ai_bubble)
             case ActionKind.CALCULATOR:
-                self._add_bubble(f"Calc: {result.body}", "BubbleAI")
+                ai_bubble = ChatBubble(role="assistant", text=f"Calc: {result.body}")
+                ai_bubble.set_status("saved")
+                self._add_widget(ai_bubble)
             case _:
                 self._chat_history.append(ChatMessage(role="user", content=result.body))
                 self._start_chat(result.body)
@@ -411,16 +392,19 @@ class FloatingPanel(QWidget):
         """Build provider and stream response via worker pool."""
         provider = self._get_provider()
         if provider is None:
-            self._add_bubble(
-                "No provider configured. Set SMARTPAD_OPENAI_BASE_URL and "
-                "SMARTPAD_OPENAI_API_KEY (or configure a provider in settings).",
-                "BubbleError",
+            err_bubble = ErrorBubble(
+                message=(
+                    "No provider configured. Set SMARTPAD_OPENAI_BASE_URL and "
+                    "SMARTPAD_OPENAI_API_KEY (or configure a provider in settings)."
+                )
             )
+            self._add_widget(err_bubble)
             self._set_status("No provider configured")
             return
 
         # AI bubble placeholder — will be filled as chunks arrive
-        ai_bubble = self._add_bubble("", "BubbleAI")
+        ai_bubble = ChatBubble(role="assistant", text="", streaming=True)
+        self._add_widget(ai_bubble)
         self._set_status("Thinking…")
 
         messages = list(self._chat_history)
@@ -439,9 +423,6 @@ class FloatingPanel(QWidget):
                 stream=True,
             ):
                 chunks.append(chunk)
-                # We can't safely call Qt from the worker thread directly, so
-                # we accumulate and emit the full list; streaming in-place is
-                # wired properly in Phase 07 with a custom QRunnable.
             return chunks
 
         self._pool.submit_high(_stream_to_list(), job_id=job_id)
@@ -483,41 +464,65 @@ class FloatingPanel(QWidget):
         if isinstance(result, list):
             # Streaming chunks list from _stream_to_list
             full_text = "".join(c.delta for c in result if isinstance(c, ChatChunk))
-            bubble.set_text(full_text)
-            self._chat_history.append(
-                ChatMessage(role="assistant", content=full_text)
-            )
+            bubble.set_content(full_text)
+            bubble.finish_streaming()
+            self._chat_history.append(ChatMessage(role="assistant", content=full_text))
         else:
-            bubble.set_text(str(result))
+            bubble.set_content(str(result))
+            bubble.finish_streaming()
 
         self._set_status("Ready")
         self._scroll_to_bottom()
 
     @pyqtSlot(str, object)
     def _on_job_error(self, job_id: str, exc: Any) -> None:
-        bubble = self._pending_jobs.pop(job_id, None)
-        if bubble is not None:
-            bubble.set_text(f"Error: {exc}")
-            bubble.setObjectName("BubbleError")
-        else:
-            self._add_bubble(f"Error: {exc}", "BubbleError")
-
+        pending_bubble = self._pending_jobs.pop(job_id, None)
+        if pending_bubble is not None:
+            idx = self._chat_layout.indexOf(pending_bubble)
+            if idx >= 0:
+                self._chat_layout.removeWidget(pending_bubble)
+                pending_bubble.deleteLater()
+        self._add_widget(ErrorBubble(message=f"Error: {exc}"))
         self._set_status("Error")
         logger.error("Worker job {} failed: {}", job_id, exc)
 
     # ── Bubble helpers ────────────────────────────────────────────────────────
 
+    def _add_widget(self, widget: QWidget) -> QWidget:
+        """Insert a bubble widget before the trailing stretch.
+
+        Args:
+            widget: Any QWidget (typically a bubble subclass).
+
+        Returns:
+            The same widget for chaining.
+        """
+        count = self._chat_layout.count()
+        self._chat_layout.insertWidget(count - 1, widget)
+        QTimer.singleShot(0, self._scroll_to_bottom)
+        return widget
+
+    # Legacy helper kept for backward-compat with existing tests that call
+    # _add_bubble() directly.
     def _add_bubble(
         self,
         text: str,
         object_name: str,
         align_right: bool = False,
-    ) -> _SimpleBubble:
-        bubble = _SimpleBubble(text, object_name, align_right=align_right)
-        # Insert before the trailing stretch
-        count = self._chat_layout.count()
-        self._chat_layout.insertWidget(count - 1, bubble)
-        QTimer.singleShot(0, self._scroll_to_bottom)
+    ) -> ChatBubble:
+        """Backward-compatible wrapper — creates a ChatBubble.
+
+        Args:
+            text: Message text.
+            object_name: QSS object name (used to guess role).
+            align_right: If ``True``, use ``role='user'`` (right-aligned).
+
+        Returns:
+            The created ChatBubble.
+        """
+        role = "user" if align_right or object_name == "BubbleUser" else "assistant"
+        bubble = ChatBubble(role=role, text=text)
+        self._add_widget(bubble)
         return bubble
 
     def _scroll_to_bottom(self) -> None:
