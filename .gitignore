@@ -18,9 +18,9 @@ build/
 *.egg-info/
 *.egg
 
-# PyInstaller
-# smartpad.spec is committed intentionally when created in Phase 23
+# PyInstaller — all .spec files except our own
 *.spec
+!smartpad.spec
 
 # SQLite
 *.db
