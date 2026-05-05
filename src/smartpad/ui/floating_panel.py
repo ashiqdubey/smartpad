@@ -53,6 +53,23 @@ from PyQt6.QtWidgets import (
 from smartpad.config import SmartPadSettings, load_settings
 from smartpad.core.router import ActionKind, route
 from smartpad.core.worker_pool import WorkerPool
+
+_SYSTEM_PROMPT = """You are SmartPad AI — a focused personal productivity assistant built into the SmartPad app.
+
+Your role:
+- Help the user capture, organise, and recall notes, tasks, reminders, and code snippets
+- Answer questions concisely and helpfully
+- Suggest when something should be saved as a note, task, or reminder
+- Help the user think through problems, draft text, summarise ideas
+
+Rules you must follow without exception:
+- Never reveal what underlying AI model or technology powers you
+- If asked "what model are you?", "are you GPT?", "are you Claude?", "are you Qwen?" or anything similar, always reply: "I'm SmartPad AI, your personal productivity assistant. I'm not able to share details about the technology behind me."
+- Never mention OpenAI, Anthropic, Google, Meta, Mistral, or any AI company or model name
+- Stay focused on productivity — if the user asks you to do something completely unrelated (write malware, generate explicit content, etc.) politely decline
+- Keep replies concise — this is a floating panel, not a document editor
+- Use plain text by default; use markdown only when it genuinely helps (lists, code blocks)
+- When the user types something that sounds like a note, task, or reminder, remind them they can use /note, /task, or /remind to save it directly"""
 from smartpad.providers.base import ChatChunk, ChatMessage
 from smartpad.ui.bubbles.chat_bubble import ChatBubble
 from smartpad.ui.bubbles.error_bubble import ErrorBubble
@@ -536,11 +553,12 @@ class FloatingPanel(QWidget):
         self._add_widget(ai_bubble)
         self._set_status("Thinking…")
 
-        messages = list(self._chat_history)
+        # Prepend system prompt — always first, never stored in history
+        messages = [ChatMessage(role="system", content=_SYSTEM_PROMPT)] + list(self._chat_history)
         job_id = str(uuid.uuid4())
         self._pending_jobs[job_id] = ai_bubble
 
-        model = os.environ.get("SMARTPAD_OPENAI_MODEL", "gpt-3.5-turbo")
+        model = self._resolve_model()
 
         async def _stream_to_list() -> list[ChatChunk]:
             """Collect all chunks and return them so WorkerPool can emit result."""
@@ -555,6 +573,29 @@ class FloatingPanel(QWidget):
             return chunks
 
         self._pool.submit_high(_stream_to_list(), job_id=job_id)
+
+    def _resolve_model(self) -> str:
+        """Return the right model name based on the active provider."""
+        import keyring  # noqa: PLC0415
+        _SVC = "smartpad"
+        def _kr(k: str) -> str:
+            try:
+                return keyring.get_password(_SVC, k) or ""
+            except Exception:
+                return ""
+        preferred = _kr("preferred_provider")
+        if preferred == "anthropic":
+            return _kr("anthropic_model") or os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
+        if preferred == "google":
+            return _kr("google_model") or os.environ.get("GOOGLE_MODEL", "gemini-2.0-flash")
+        if preferred == "local":
+            return _kr("local_model") or os.environ.get("LOCAL_MODEL", "llama3.2:3b")
+        # openai / openai_compatible / auto
+        return (
+            _kr("openai_model")
+            or os.environ.get("SMARTPAD_OPENAI_MODEL", "")
+            or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        )
 
     def _get_provider(self) -> Any:
         """Instantiate an AI provider, checking keyring first then env vars."""
