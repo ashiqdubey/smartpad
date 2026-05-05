@@ -19,6 +19,8 @@ class TrayIcon(QObject):
 
     show_panel = pyqtSignal()
     quit_requested = pyqtSignal()
+    open_settings = pyqtSignal()
+    open_browse = pyqtSignal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -32,12 +34,17 @@ class TrayIcon(QObject):
         menu = QMenu()
         open_action = menu.addAction("Open SmartPad")
         menu.addSeparator()
+        browse_action = menu.addAction("Notes && Tasks")
+        settings_action = menu.addAction("Settings")
+        menu.addSeparator()
         quit_action = menu.addAction("Quit")
 
         self._tray.setContextMenu(menu)
 
         # Connections
         open_action.triggered.connect(self.show_panel)
+        browse_action.triggered.connect(self.open_browse)
+        settings_action.triggered.connect(self.open_settings)
         quit_action.triggered.connect(self.quit_requested)
         self._tray.activated.connect(self._on_activated)
 
