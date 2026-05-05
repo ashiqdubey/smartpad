@@ -19,48 +19,53 @@ QDialog, QMainWindow {
     color: #e2e2f0;
 }
 
-/* ── Floating panel ──────────────────────────────────────────────────────── */
+/* ── Floating panel — background painted via paintEvent, not QSS ─────────── */
 #FloatingPanel {
-    background-color: rgba(12, 12, 28, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 16px;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 #PanelHeader {
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: rgba(255, 255, 255, 0.035);
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-    min-height: 46px;
-    max-height: 46px;
+    min-height: 50px;
+    max-height: 50px;
     padding: 0 4px;
 }
 
+#HeaderDot {
+    color: #7c8bff;
+    font-size: 11px;
+    margin-right: 2px;
+}
+
 #HeaderTitle {
-    color: rgba(230, 230, 255, 0.9);
+    color: rgba(225, 225, 255, 0.88);
     font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
 }
 
 #CloseButton, #SettingsButton, #BrowseButton {
     background-color: transparent;
-    color: rgba(200, 200, 230, 0.55);
+    color: rgba(200, 200, 230, 0.45);
     border: none;
-    border-radius: 7px;
-    font-size: 15px;
+    border-radius: 8px;
+    font-size: 14px;
     padding: 2px;
 }
 
 #CloseButton:hover {
-    background-color: rgba(243, 139, 168, 0.18);
+    background-color: rgba(243, 139, 168, 0.16);
     color: #f38ba8;
 }
 
 #SettingsButton:hover, #BrowseButton:hover {
-    background-color: rgba(124, 139, 255, 0.18);
-    color: #a0aaff;
+    background-color: rgba(124, 139, 255, 0.16);
+    color: #b0baff;
 }
 
 /* ── Chat scroll area ────────────────────────────────────────────────────── */
@@ -220,22 +225,24 @@ QDialog, QMainWindow {
 
 /* ── Send button ─────────────────────────────────────────────────────────── */
 #SendButton {
-    background-color: rgba(100, 115, 255, 0.80);
+    background-color: rgba(100, 115, 255, 0.85);
     color: #ffffff;
     border: none;
-    border-radius: 8px;
-    padding: 0 16px;
-    font-weight: 600;
-    font-size: 13px;
-    min-height: 36px;
+    border-radius: 21px;
+    font-size: 16px;
+    font-weight: 700;
+    min-width: 42px;
+    min-height: 42px;
+    max-width: 42px;
+    max-height: 42px;
 }
 
 #SendButton:hover {
-    background-color: rgba(120, 135, 255, 0.95);
+    background-color: rgba(130, 145, 255, 1.0);
 }
 
 #SendButton:pressed {
-    background-color: rgba(80, 95, 230, 0.95);
+    background-color: rgba(75, 90, 220, 1.0);
 }
 
 /* ── Tray / context menu ─────────────────────────────────────────────────── */

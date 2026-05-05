@@ -29,6 +29,7 @@ from typing import Any
 
 from loguru import logger
 from PyQt6.QtCore import (
+    QEasingCurve,
     QEvent,
     QPoint,
     QPropertyAnimation,
@@ -37,9 +38,15 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSlot,
 )
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import (
+    QColor,
+    QKeyEvent,
+    QPainter,
+    QPainterPath,
+)
 from PyQt6.QtWidgets import (
     QApplication,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -118,13 +125,21 @@ class FloatingPanel(QWidget):
 
     def _build_window(self) -> None:
         self.setObjectName("FloatingPanel")
+        self.setWindowTitle("SmartPad")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool  # avoids taskbar entry on most platforms
+            # No Tool flag — keeps it in taskbar and Alt+Tab
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setMinimumSize(300, 400)
+        self.setMinimumSize(440, 540)
+
+        # Drop shadow for depth (works without blur)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(32)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 140))
+        self.setGraphicsEffect(shadow)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -141,34 +156,40 @@ class FloatingPanel(QWidget):
         header.setObjectName("PanelHeader")
 
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(12, 0, 8, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 0, 10, 0)
+        layout.setSpacing(6)
+
+        # Coloured dot logo
+        dot = QLabel("●")
+        dot.setObjectName("HeaderDot")
 
         title = QLabel("SmartPad")
         title.setObjectName("HeaderTitle")
 
-        settings_btn = QPushButton("⚙")
-        settings_btn.setObjectName("SettingsButton")
-        settings_btn.setFixedSize(QSize(28, 28))
-        settings_btn.clicked.connect(self._open_settings)
-        settings_btn.setToolTip("Settings")
+        def _icon_btn(icon: str, tip: str) -> QPushButton:
+            btn = QPushButton(icon)
+            btn.setFixedSize(QSize(30, 30))
+            btn.setToolTip(tip)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            return btn
 
-        browse_btn = QPushButton("☰")
+        browse_btn = _icon_btn("📋", "Notes & Tasks  (☰)")
         browse_btn.setObjectName("BrowseButton")
-        browse_btn.setFixedSize(QSize(28, 28))
         browse_btn.clicked.connect(self._open_browse)
-        browse_btn.setToolTip("Notes & Tasks")
 
-        close_btn = QPushButton("✕")
+        settings_btn = _icon_btn("⚙", "Settings")
+        settings_btn.setObjectName("SettingsButton")
+        settings_btn.clicked.connect(self._open_settings)
+
+        close_btn = _icon_btn("✕", "Hide panel  (Esc)")
         close_btn.setObjectName("CloseButton")
-        close_btn.setFixedSize(QSize(28, 28))
         close_btn.clicked.connect(self.hide_panel)
-        close_btn.setToolTip("Close panel")
 
+        layout.addWidget(dot)
         layout.addWidget(title)
         layout.addStretch()
-        layout.addWidget(settings_btn)
         layout.addWidget(browse_btn)
+        layout.addWidget(settings_btn)
         layout.addWidget(close_btn)
 
         # Make the header draggable
@@ -221,14 +242,16 @@ class FloatingPanel(QWidget):
 
         self._input = QTextEdit()
         self._input.setObjectName("MessageInput")
-        self._input.setPlaceholderText("Ask anything… (type / for commands)")
-        self._input.setFixedHeight(60)
+        self._input.setPlaceholderText("Ask anything… or type / for commands")
+        self._input.setFixedHeight(72)
         self._input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input.installEventFilter(self)
 
-        send_btn = QPushButton("Send")
+        send_btn = QPushButton("➤")
         send_btn.setObjectName("SendButton")
-        send_btn.setFixedHeight(36)
+        send_btn.setFixedSize(QSize(42, 42))
+        send_btn.setToolTip("Send  (Enter)")
+        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
 
         layout.addWidget(self._input)
@@ -245,21 +268,31 @@ class FloatingPanel(QWidget):
 
     def _apply_geometry(self) -> None:
         s = self._settings
-        w = s.panel_width
-        h = s.panel_height
+        w = max(s.panel_width, 460)
+        h = max(s.panel_height, 560)
+
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+
+        # Compute the right-anchored default position
+        if avail:
+            default_x = avail.right() - w - 40
+            default_y = avail.top() + 60
+        else:
+            default_x, default_y = 900, 60
 
         if s.panel_position_x == -1:
-            # Default: top-right, 80px from top, 60px from right
-            screen = QApplication.primaryScreen()
-            if screen is not None:
-                avail = screen.availableGeometry()
-                x = avail.right() - w - 60
-                y = avail.top() + 80
-            else:
-                x, y = 100, 80
+            x, y = default_x, default_y
         else:
-            x = s.panel_position_x
-            y = s.panel_position_y
+            x, y = s.panel_position_x, s.panel_position_y
+
+        # Clamp so the panel is always fully on screen
+        if avail:
+            x = max(avail.left() + 8, min(x, avail.right() - w - 8))
+            y = max(avail.top() + 8, min(y, avail.bottom() - h - 8))
+            # If only a sliver of the panel would be visible, reset to default
+            if x + w < avail.left() + 100 or x > avail.right() - 100:
+                x, y = default_x, default_y
 
         self.setGeometry(x, y, w, h)
 
@@ -277,35 +310,45 @@ class FloatingPanel(QWidget):
     # ── Show / Hide with fade animation ───────────────────────────────────────
 
     def show_panel(self) -> None:
-        """Show the panel with a 150ms opacity fade."""
+        """Show the panel with a smooth 180ms opacity fade."""
         if self.isVisible():
             self.activateWindow()
             self._input.setFocus()
             return
 
+        # Stop any in-progress hide animation first
+        if hasattr(self, "_hide_anim") and self._hide_anim.state() == QPropertyAnimation.State.Running:
+            self._hide_anim.stop()
+
         self.setWindowOpacity(0.0)
         self.show()
         self._enable_acrylic_blur()
+        self.raise_()
         self.activateWindow()
         self._input.setFocus()
 
         anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(150)
+        anim.setDuration(180)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.setStartValue(0.0)
         anim.setEndValue(1.0)
         anim.start()
-        # Keep reference alive
         self._show_anim = anim
 
     def hide_panel(self) -> None:
-        """Hide the panel with a 150ms opacity fade."""
+        """Hide the panel with a smooth 200ms opacity fade."""
         if not self.isVisible():
             return
 
         self._save_geometry()
 
+        # Stop any in-progress hide animation
+        if hasattr(self, "_hide_anim") and self._hide_anim.state() == QPropertyAnimation.State.Running:
+            self._hide_anim.stop()
+
         anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(150)
+        anim.setDuration(200)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.setStartValue(self.windowOpacity())
         anim.setEndValue(0.0)
         anim.finished.connect(self.hide)
@@ -362,6 +405,15 @@ class FloatingPanel(QWidget):
             logger.debug("Acrylic blur not available: {}", exc)
 
     # ── Event handling ────────────────────────────────────────────────────────
+
+    def paintEvent(self, event: Any) -> None:
+        """Paint the panel background with anti-aliased rounded corners."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
+        painter.fillPath(path, QColor(14, 14, 32, 235))
+        painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
