@@ -39,10 +39,12 @@ from PyQt6.QtCore import (
     pyqtSlot,
 )
 from PyQt6.QtGui import (
+    QBrush,
     QColor,
     QKeyEvent,
     QPainter,
     QPainterPath,
+    QRadialGradient,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -87,6 +89,7 @@ from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
 from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
 from smartpad.ui.bubbles.task_bubble import TaskBubble
 from smartpad.ui.slash_menu import SlashMenu
+from smartpad.ui.widgets import LogoMark
 
 class _ChatThread(QThread):
     """QThread that streams LLM chunks and emits one signal per token."""
@@ -183,11 +186,11 @@ class FloatingPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumSize(440, 540)
 
-        # Subtle neutral shadow — no colour tint
+        # Big, soft drop shadow — sets the panel apart from the wallpaper
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 55))
+        shadow.setBlurRadius(60)
+        shadow.setOffset(0, 18)
+        shadow.setColor(QColor(8, 6, 18, 165))
         self.setGraphicsEffect(shadow)
 
     def _build_ui(self) -> None:
@@ -206,11 +209,10 @@ class FloatingPanel(QWidget):
 
         layout = QHBoxLayout(header)
         layout.setContentsMargins(14, 0, 10, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
 
-        # Coloured dot logo
-        dot = QLabel("●")
-        dot.setObjectName("HeaderDot")
+        # Gradient brand mark
+        mark = LogoMark(20)
 
         title = QLabel("SmartPad")
         title.setObjectName("HeaderTitle")
@@ -234,7 +236,7 @@ class FloatingPanel(QWidget):
         close_btn.setObjectName("CloseButton")
         close_btn.clicked.connect(self.hide_panel)
 
-        layout.addWidget(dot)
+        layout.addWidget(mark)
         layout.addWidget(title)
         layout.addStretch()
         layout.addWidget(browse_btn)
@@ -272,8 +274,8 @@ class FloatingPanel(QWidget):
         self._chat_container = QWidget()
         self._chat_container.setObjectName("ChatContainer")
         self._chat_layout = QVBoxLayout(self._chat_container)
-        self._chat_layout.setContentsMargins(0, 8, 0, 8)
-        self._chat_layout.setSpacing(4)
+        self._chat_layout.setContentsMargins(2, 12, 2, 6)
+        self._chat_layout.setSpacing(8)
         self._chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         # Spacer so bubbles hug top
         self._chat_layout.addStretch()
@@ -468,7 +470,8 @@ class FloatingPanel(QWidget):
             accent = ACCENT_POLICY()
             accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
             accent.AccentFlags = 2
-            accent.GradientColor = 0xBB12122a  # ABGR semi-transparent dark blue
+            # ABGR for QColor(22, 20, 34) at ~62% alpha — matches paintEvent base
+            accent.GradientColor = 0x9C221416
 
             data = WINDOWCOMPOSITIONATTRIBDATA()
             data.Attribute = 19  # WCA_ACCENT_POLICY
@@ -485,12 +488,27 @@ class FloatingPanel(QWidget):
     # ── Event handling ────────────────────────────────────────────────────────
 
     def paintEvent(self, event: Any) -> None:
-        """Paint the panel background with anti-aliased rounded corners."""
+        """Paint the panel: glass background + soft accent glow at the bottom."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+
         path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 18.0, 18.0)
-        painter.fillPath(path, QColor(22, 20, 34, 242))
+        path.addRoundedRect(0.0, 0.0, w, h, 18.0, 18.0)
+
+        # Glass base — slightly translucent so acrylic shows through
+        painter.fillPath(path, QColor(22, 20, 34, 232))
+
+        # Accent glow rising from the bottom centre
+        glow = QRadialGradient(w / 2.0, h, w * 0.85)
+        glow.setColorAt(0.0, QColor(124, 110, 245, 64))
+        glow.setColorAt(1.0, QColor(124, 110, 245, 0))
+        painter.fillPath(path, QBrush(glow))
+
+        # Top inner highlight — subtle 1px line that sells the glass illusion
+        painter.setPen(QColor(255, 255, 255, 18))
+        painter.drawLine(8, 1, int(w) - 8, 1)
+
         painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

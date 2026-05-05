@@ -5,10 +5,10 @@ import asyncio
 from typing import Any
 
 from loguru import logger
-from PyQt6.QtCore import Qt, QPoint, QSize, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QSize, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
     QDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from smartpad.ui.widgets import LogoMark
 
 
 class _DBLoader(QThread):
@@ -56,39 +58,59 @@ class _DBLoader(QThread):
 class BrowseWindow(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Notes & Tasks")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setWindowTitle("SmartPad — Notes & Tasks")
+        # Window flag (not Dialog) — keeps it on the taskbar
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Window
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumSize(720, 520)
-        self.resize(820, 560)
+        self.setMinimumSize(760, 540)
+        self.resize(840, 580)
         self._drag_pos: QPoint | None = None
         self._all_notes: list[Any] = []
         self._all_tasks: list[Any] = []
         self._all_reminders: list[Any] = []
         self._all_snippets: list[Any] = []
+        self._loader: _DBLoader | None = None
         self._setup_ui()
         self._load()
+
+    def paintEvent(self, event: object) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
+        p.fillPath(path, QColor(22, 20, 34, 244))
+        from PyQt6.QtGui import QBrush, QRadialGradient
+        glow = QRadialGradient(self.width() / 2, 0, self.width() * 0.7)
+        glow.setColorAt(0.0, QColor(124, 110, 245, 60))
+        glow.setColorAt(1.0, QColor(124, 110, 245, 0))
+        p.fillPath(path, QBrush(glow))
+        p.end()
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
         root.addWidget(self._make_title_bar())
 
         content = QWidget()
         cl = QVBoxLayout(content)
-        cl.setContentsMargins(16, 8, 16, 14)
-        cl.setSpacing(8)
+        cl.setContentsMargins(20, 10, 20, 16)
+        cl.setSpacing(10)
 
-        # Search bar
+        # Search row
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search…")
+        self._search.setPlaceholderText("Search notes, tasks, reminders, snippets…")
         self._search.textChanged.connect(self._filter)
         refresh_btn = QPushButton("↺  Refresh")
-        refresh_btn.setFixedWidth(100)
+        refresh_btn.setObjectName("RefreshButton")
+        refresh_btn.setFixedWidth(110)
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self._load)
         search_row.addWidget(self._search)
         search_row.addWidget(refresh_btn)
@@ -123,7 +145,7 @@ class BrowseWindow(QDialog):
 
         # Status row
         self._status = QLabel("Loading…")
-        self._status.setStyleSheet("color: rgba(255,255,255,0.30); font-size: 11px;")
+        self._status.setObjectName("BrowseStatus")
         cl.addWidget(self._status)
 
         root.addWidget(content, stretch=1)
@@ -131,26 +153,28 @@ class BrowseWindow(QDialog):
     def _make_title_bar(self) -> QWidget:
         bar = QWidget()
         bar.setObjectName("DialogTitleBar")
-        bar.setFixedHeight(52)
+        bar.setFixedHeight(56)
 
         row = QHBoxLayout(bar)
-        row.setContentsMargins(20, 0, 14, 0)
-        row.setSpacing(8)
+        row.setContentsMargins(18, 0, 14, 0)
+        row.setSpacing(10)
+
+        row.addWidget(LogoMark(20))
 
         title = QLabel("Notes & Tasks")
         title.setObjectName("DialogTitle")
+        row.addWidget(title)
+        row.addStretch()
 
         close_btn = QPushButton("✕")
         close_btn.setObjectName("DialogCloseButton")
         close_btn.setFixedSize(QSize(28, 28))
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.clicked.connect(self.close)
-
-        row.addWidget(title)
-        row.addStretch()
         row.addWidget(close_btn)
 
-        bar.mousePressEvent = self._bar_press    # type: ignore[method-assign]
-        bar.mouseMoveEvent = self._bar_move      # type: ignore[method-assign]
+        bar.mousePressEvent = self._bar_press   # type: ignore[method-assign]
+        bar.mouseMoveEvent = self._bar_move     # type: ignore[method-assign]
         bar.mouseReleaseEvent = self._bar_release  # type: ignore[method-assign]
         return bar
 
@@ -165,18 +189,42 @@ class BrowseWindow(QDialog):
     def _bar_release(self, event) -> None:  # type: ignore[no-untyped-def]
         self._drag_pos = None
 
+    # ── Data loading ──────────────────────────────────────────────────────────
+
     def _load(self) -> None:
         self._status.setText("Loading…")
-        self._loader = _DBLoader()
-        self._loader.finished.connect(self._on_loaded)
-        self._loader.start()
+        # Stop any in-flight loader before starting a new one
+        if self._loader is not None and self._loader.isRunning():
+            try:
+                self._loader.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        loader = _DBLoader(self)  # parent=self anchors lifetime to dialog
+        loader.finished.connect(self._on_loaded)
+        loader.finished.connect(loader.deleteLater)
+        self._loader = loader
+        loader.start()
 
+    @pyqtSlot(list, list, list, list)
     def _on_loaded(self, notes: list, tasks: list, reminders: list, snippets: list) -> None:
         self._all_notes = notes
         self._all_tasks = tasks
         self._all_reminders = reminders
         self._all_snippets = snippets
         self._populate(self._search.text())
+
+    def closeEvent(self, event: object) -> None:  # noqa: N802
+        # Disconnect signal so a late-arriving DB result doesn't poke a dead UI
+        loader = self._loader
+        if loader is not None:
+            try:
+                loader.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if loader.isRunning():
+                loader.quit()
+                loader.wait(2000)
+        super().closeEvent(event)  # type: ignore[arg-type]
 
     def _filter(self, text: str) -> None:
         self._populate(text)
@@ -232,7 +280,7 @@ class BrowseWindow(QDialog):
             len([s for s in self._all_snippets if _match(s.content)]),
         ]
         self._status.setText(
-            f"{counts[0]} notes  ·  {counts[1]} tasks  ·  {counts[2]} reminders  ·  {counts[3]} snippets"
+            f"{counts[0]} notes · {counts[1]} tasks · {counts[2]} reminders · {counts[3]} snippets"
         )
 
     @staticmethod

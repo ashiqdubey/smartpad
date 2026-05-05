@@ -104,26 +104,28 @@ QWidget {
 #BubbleUser {
     background-color: #7c6ef5;
     color: #ffffff;
-    border-radius: 14px 14px 4px 14px;
-    padding: 9px 13px;
-    margin: 3px 10px 3px 50px;
+    border-radius: 14px 14px 5px 14px;
+    padding: 10px 14px;
+    margin: 0 14px 0 60px;
 }
 #BubbleUser QLabel {
     background-color: transparent;
     color: #ffffff;
+    font-size: 13.5px;
 }
 
 #BubbleAI {
     background-color: rgba(246, 246, 250, 0.05);
-    color: rgba(246, 246, 250, 0.90);
+    color: rgba(246, 246, 250, 0.92);
     border: 1px solid rgba(240, 240, 248, 0.10);
-    border-radius: 4px 14px 14px 14px;
-    padding: 9px 13px;
-    margin: 3px 50px 3px 10px;
+    border-radius: 5px 14px 14px 14px;
+    padding: 10px 14px;
+    margin: 0 60px 0 14px;
 }
 #BubbleAI QLabel {
     background-color: transparent;
-    color: rgba(246, 246, 250, 0.90);
+    color: rgba(246, 246, 250, 0.92);
+    font-size: 13.5px;
 }
 
 /* Saved item bubbles — left-accent-bar style */
@@ -322,6 +324,71 @@ QLabel {
     max-width: 26px;
 }
 #DialogCloseButton:hover { background-color: rgba(255, 59, 48, 0.14); color: rgba(255, 80, 70, 1.0); }
+
+/* ── Settings cards (glass tiles inside tabs) ──────────────────────────────── */
+#SettingsCard {
+    background-color: rgba(246, 246, 250, 0.025);
+    border: 1px solid rgba(240, 240, 248, 0.08);
+    border-radius: 14px;
+}
+#CardKicker {
+    color: rgba(246, 246, 250, 0.42);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    background-color: transparent;
+}
+#CardSub {
+    color: rgba(246, 246, 250, 0.50);
+    font-size: 12px;
+    background-color: transparent;
+}
+#RowLabel {
+    color: rgba(246, 246, 250, 0.90);
+    font-size: 13px;
+    font-weight: 500;
+    background-color: transparent;
+}
+#RowSub {
+    color: rgba(246, 246, 250, 0.42);
+    font-size: 11.5px;
+    background-color: transparent;
+}
+#KeyToggleButton {
+    background-color: rgba(246, 246, 250, 0.06);
+    color: rgba(246, 246, 250, 0.78);
+    border: 1px solid rgba(240, 240, 248, 0.12);
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 11.5px;
+    min-height: 30px;
+}
+#KeyToggleButton:hover { background-color: rgba(246, 246, 250, 0.10); }
+#KeyToggleButton:checked { background-color: rgba(124, 110, 245, 0.20); color: #ffffff; border-color: rgba(124, 110, 245, 0.55); }
+
+#RefreshButton {
+    background-color: rgba(124, 110, 245, 0.12);
+    color: rgba(220, 215, 255, 0.95);
+    border: 1px solid rgba(124, 110, 245, 0.30);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    min-height: 30px;
+}
+#RefreshButton:hover { background-color: rgba(124, 110, 245, 0.22); }
+
+#BrowseStatus {
+    color: rgba(246, 246, 250, 0.42);
+    font-size: 11.5px;
+    padding: 2px 4px;
+    background-color: transparent;
+}
+
+#SettingsTabs::pane {
+    border: none;
+    background-color: transparent;
+    top: 4px;
+}
 
 /* ── Tabs ────────────────────────────────────────────────────────────────────── */
 QTabWidget::pane {
@@ -530,6 +597,19 @@ QMenu::separator { height: 1px; background-color: rgba(26,24,48,0.07); margin: 3
 #DialogDoneButton:hover { background-color: #8d80ff; }
 #DialogCloseButton { background-color: transparent; color: rgba(26,24,48,0.32); border: none; border-radius: 6px; font-size: 13px; padding: 3px 7px; min-height: 26px; max-height: 26px; min-width: 26px; max-width: 26px; }
 #DialogCloseButton:hover { background-color: rgba(255,59,48,0.10); color: rgba(200,30,20,1.0); }
+
+#SettingsCard { background-color: rgba(26,24,48,0.025); border: 1px solid rgba(26,24,48,0.08); border-radius: 14px; }
+#CardKicker { color: rgba(26,24,48,0.45); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; background-color: transparent; }
+#CardSub { color: rgba(26,24,48,0.55); font-size: 12px; background-color: transparent; }
+#RowLabel { color: rgba(26,24,48,0.90); font-size: 13px; font-weight: 500; background-color: transparent; }
+#RowSub { color: rgba(26,24,48,0.50); font-size: 11.5px; background-color: transparent; }
+#KeyToggleButton { background-color: rgba(26,24,48,0.06); color: rgba(26,24,48,0.78); border: 1px solid rgba(26,24,48,0.10); border-radius: 7px; padding: 4px 8px; font-size: 11.5px; min-height: 30px; }
+#KeyToggleButton:hover { background-color: rgba(26,24,48,0.10); }
+#KeyToggleButton:checked { background-color: rgba(124,110,245,0.18); color: #1a1830; border-color: rgba(124,110,245,0.50); }
+#RefreshButton { background-color: rgba(124,110,245,0.10); color: #2a1f80; border: 1px solid rgba(124,110,245,0.30); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; min-height: 30px; }
+#RefreshButton:hover { background-color: rgba(124,110,245,0.18); }
+#BrowseStatus { color: rgba(26,24,48,0.42); font-size: 11.5px; padding: 2px 4px; background-color: transparent; }
+#SettingsTabs::pane { border: none; background-color: transparent; top: 4px; }
 
 QTabWidget::pane { border: 1px solid rgba(26,24,48,0.08); border-radius: 10px; background-color: transparent; top: -1px; }
 QTabBar { background-color: transparent; }
