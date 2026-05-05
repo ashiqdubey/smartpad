@@ -1,216 +1,209 @@
-"""Browse window — SPEC.MD section 12 (secondary window).
-
-Layout:
-  Left sidebar: Books list + filter pills (Today, This Week, Pinned, All)
-  Right pane:   Card grid of items in selected book/filter
-  Top bar:      Search box (FTS5), sort dropdown, type filter chips
-"""
-
+"""Browse window — view all notes, tasks, reminders, snippets."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+import asyncio
+from typing import Any
+
+from loguru import logger
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QSplitter,
+    QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 
-class BrowseWindow(QWidget):
-    """Secondary browse window — 900×600 default, resizable."""
+class _DBLoader(QThread):
+    """Background thread: loads all items from DB."""
 
-    search_requested = pyqtSignal(str)    # FTS5 search query
-    item_selected = pyqtSignal(str, str)  # (item_id, item_type)
+    finished = pyqtSignal(list, list, list, list)  # notes, tasks, reminders, snippets
 
+    def run(self) -> None:
+        try:
+            result = asyncio.run(self._load())
+        except Exception as exc:
+            logger.error("BrowseWindow DB load failed: {}", exc)
+            result = ([], [], [], [])
+        self.finished.emit(*result)
+
+    @staticmethod
+    async def _load() -> tuple[list, list, list, list]:
+        from smartpad.db.engine import get_async_session
+        from smartpad.db.repositories.notes import NotesRepo
+        from smartpad.db.repositories.reminders import RemindersRepo
+        from smartpad.db.repositories.snippets import SnippetsRepo
+        from smartpad.db.repositories.tasks import TasksRepo
+
+        async with get_async_session() as s:
+            notes = await NotesRepo(s).list(limit=200)
+        async with get_async_session() as s:
+            tasks = await TasksRepo(s).list(limit=200)
+        async with get_async_session() as s:
+            reminders = await RemindersRepo(s).list(limit=200)
+        async with get_async_session() as s:
+            snippets = await SnippetsRepo(s).list(limit=200)
+        return notes, tasks, reminders, snippets
+
+
+class BrowseWindow(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("SmartPad — Browse")
-        self.resize(900, 600)
-        self.setMinimumSize(600, 400)
-        self._current_filter = "all"
-        self._current_book: str | None = None
-        self._build_ui()
+        self.setMinimumSize(760, 520)
+        self.resize(860, 580)
+        self._all_notes: list[Any] = []
+        self._all_tasks: list[Any] = []
+        self._all_reminders: list[Any] = []
+        self._all_snippets: list[Any] = []
+        self._setup_ui()
+        self._load()
 
-    # ── Build ─────────────────────────────────────────────────────────────────
-
-    def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        root.addWidget(self._build_top_bar())
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._build_sidebar())
-        splitter.addWidget(self._build_card_pane())
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([200, 700])
-        root.addWidget(splitter, stretch=1)
-
-    def _build_top_bar(self) -> QWidget:
-        bar = QWidget()
-        bar.setObjectName("BrowseTopBar")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 8, 12, 8)
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        self._search_box = QLineEdit()
-        self._search_box.setObjectName("BrowseSearch")
-        self._search_box.setPlaceholderText("Search notes, tasks, snippets…")
-        self._search_box.returnPressed.connect(self._on_search)
-        layout.addWidget(self._search_box, stretch=1)
+        # Search bar
+        search_row = QHBoxLayout()
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Filter…")
+        self._search.textChanged.connect(self._filter)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setFixedWidth(90)
+        refresh_btn.clicked.connect(self._load)
+        search_row.addWidget(self._search)
+        search_row.addWidget(refresh_btn)
+        layout.addLayout(search_row)
 
-        # Type filter chips
-        for label, tag in [("All", "all"), ("Notes", "note"), ("Tasks", "task"),
-                            ("Reminders", "reminder"), ("Snippets", "snippet")]:
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setChecked(tag == "all")
-            btn.setObjectName("TypeChip")
-            btn.clicked.connect(lambda checked, t=tag: self._set_type_filter(t))
-            layout.addWidget(btn)
+        # Tabs
+        self._tabs = QTabWidget()
 
-        return bar
+        self._notes_list = QListWidget()
+        self._tasks_list = QListWidget()
+        self._reminders_list = QListWidget()
+        self._snippets_list = QListWidget()
 
-    def _build_sidebar(self) -> QWidget:
-        sidebar = QWidget()
-        sidebar.setObjectName("BrowseSidebar")
-        sidebar.setFixedWidth(200)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(8, 8, 4, 8)
-        layout.setSpacing(4)
+        for name, lst in [
+            ("Notes", self._notes_list),
+            ("Tasks", self._tasks_list),
+            ("Reminders", self._reminders_list),
+            ("Snippets", self._snippets_list),
+        ]:
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            detail = QTextEdit()
+            detail.setReadOnly(True)
+            lst.setProperty("_detail", detail)  # pair each list with its own detail
+            splitter.addWidget(lst)
+            splitter.addWidget(detail)
+            splitter.setSizes([420, 320])
+            lst.currentItemChanged.connect(
+                lambda cur, prev, d=detail: self._on_select(cur, d)
+            )
+            self._tabs.addTab(splitter, name)
 
-        filter_label = QLabel("Quick filters")
-        filter_label.setObjectName("SidebarSection")
-        layout.addWidget(filter_label)
+        layout.addWidget(self._tabs)
 
-        for label, key in [("📅 Today", "today"), ("📆 This week", "week"),
-                            ("📌 Pinned", "pinned"), ("🗂 All items", "all")]:
-            btn = QPushButton(label)
-            btn.setObjectName("SidebarFilter")
-            btn.setCheckable(True)
-            btn.setChecked(key == "all")
-            btn.clicked.connect(lambda checked, k=key: self._set_filter(k))
-            layout.addWidget(btn)
+        self._status = QLabel("Loading…")
+        layout.addWidget(self._status)
 
-        books_label = QLabel("Books")
-        books_label.setObjectName("SidebarSection")
-        layout.addWidget(books_label)
+    def _load(self) -> None:
+        self._status.setText("Loading…")
+        self._loader = _DBLoader()
+        self._loader.finished.connect(self._on_loaded)
+        self._loader.start()
 
-        self._books_list = QListWidget()
-        self._books_list.setObjectName("BooksList")
-        self._books_list.currentItemChanged.connect(self._on_book_selected)
-        layout.addWidget(self._books_list, stretch=1)
+    def _on_loaded(
+        self, notes: list, tasks: list, reminders: list, snippets: list
+    ) -> None:
+        self._all_notes = notes
+        self._all_tasks = tasks
+        self._all_reminders = reminders
+        self._all_snippets = snippets
+        self._populate(self._search.text())
 
-        return sidebar
+    def _filter(self, text: str) -> None:
+        self._populate(text)
 
-    def _build_card_pane(self) -> QWidget:
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def _populate(self, query: str) -> None:
+        q = query.lower()
 
-        self._cards_scroll = QScrollArea()
-        self._cards_scroll.setObjectName("CardsArea")
-        self._cards_scroll.setWidgetResizable(True)
+        def _match(content: str) -> bool:
+            return not q or q in content.lower()
 
-        self._cards_container = QWidget()
-        self._cards_container.setObjectName("CardsContainer")
-        self._cards_layout = QVBoxLayout(self._cards_container)
-        self._cards_layout.setContentsMargins(12, 12, 12, 12)
-        self._cards_layout.setSpacing(8)
-        self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._empty_label = QLabel("Nothing here yet. Start capturing!")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setObjectName("EmptyState")
-        self._cards_layout.addWidget(self._empty_label)
+        # Notes
+        self._notes_list.clear()
+        for n in self._all_notes:
+            if _match(n.content):
+                item = QListWidgetItem(
+                    n.content[:90] + ("…" if len(n.content) > 90 else "")
+                )
+                item.setData(Qt.ItemDataRole.UserRole, n.content)
+                self._notes_list.addItem(item)
 
-        self._cards_scroll.setWidget(self._cards_container)
-        layout.addWidget(self._cards_scroll)
-        return pane
+        # Tasks
+        self._tasks_list.clear()
+        for t in self._all_tasks:
+            if _match(t.content):
+                icon = "✓" if t.status == "done" else "○"
+                dl = (
+                    f"  [due {t.deadline.strftime('%Y-%m-%d')}]"
+                    if getattr(t, "deadline", None)
+                    else ""
+                )
+                item = QListWidgetItem(f"{icon} {t.content[:80]}{dl}")
+                detail = f"Status: {t.status}\nContent: {t.content}"
+                if getattr(t, "deadline", None):
+                    detail += f"\nDeadline: {t.deadline}"
+                item.setData(Qt.ItemDataRole.UserRole, detail)
+                self._tasks_list.addItem(item)
 
-    # ── Public API ────────────────────────────────────────────────────────────
+        # Reminders
+        self._reminders_list.clear()
+        for r in self._all_reminders:
+            if _match(r.content):
+                t_str = (
+                    r.trigger_at.strftime("%Y-%m-%d %H:%M")
+                    if getattr(r, "trigger_at", None)
+                    else "—"
+                )
+                done = "✓" if getattr(r, "notified", False) else "\U0001f514"
+                item = QListWidgetItem(f"{done} {r.content[:70]}  @{t_str}")
+                detail = f"Content: {r.content}\nTrigger: {t_str}\nNotified: {r.notified}"
+                item.setData(Qt.ItemDataRole.UserRole, detail)
+                self._reminders_list.addItem(item)
 
-    def populate_books(self, books: list[dict[str, str]]) -> None:
-        """Set the books list. books is a list of {id, name} dicts."""
-        self._books_list.clear()
-        for b in books:
-            item = QListWidgetItem(b["name"])
-            item.setData(Qt.ItemDataRole.UserRole, b["id"])
-            self._books_list.addItem(item)
+        # Snippets
+        self._snippets_list.clear()
+        for s in self._all_snippets:
+            if _match(s.content):
+                lang = getattr(s, "language", "") or ""
+                label = f"[{lang}] " if lang else ""
+                item = QListWidgetItem(f"{label}{s.content[:80]}")
+                item.setData(Qt.ItemDataRole.UserRole, s.content)
+                self._snippets_list.addItem(item)
 
-    def populate_cards(self, items: list[dict]) -> None:
-        """Populate the card grid. Each item: {id, type, content, created_at, ...}"""
-        # Clear existing cards except empty label
-        for i in reversed(range(self._cards_layout.count())):
-            w = self._cards_layout.itemAt(i).widget()
-            if w is not self._empty_label:
-                self._cards_layout.removeWidget(w)
-                w.deleteLater()
+        counts = [
+            len([n for n in self._all_notes if _match(n.content)]),
+            len([t for t in self._all_tasks if _match(t.content)]),
+            len([r for r in self._all_reminders if _match(r.content)]),
+            len([s for s in self._all_snippets if _match(s.content)]),
+        ]
+        self._status.setText(
+            f"{counts[0]} notes  ·  {counts[1]} tasks  ·  "
+            f"{counts[2]} reminders  ·  {counts[3]} snippets"
+        )
 
-        self._empty_label.setVisible(len(items) == 0)
-
-        for item in items:
-            card = self._make_card(item)
-            self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
-
-    # ── Slots ─────────────────────────────────────────────────────────────────
-
-    def _on_search(self) -> None:
-        query = self._search_box.text().strip()
-        if query:
-            self.search_requested.emit(query)
-
-    def _set_filter(self, key: str) -> None:
-        self._current_filter = key
-
-    def _set_type_filter(self, tag: str) -> None:
-        pass  # Wired to DB queries in Phase 19 full implementation
-
-    def _on_book_selected(self, current: QListWidgetItem, _prev: object) -> None:
-        if current:
-            self._current_book = current.data(Qt.ItemDataRole.UserRole)
-
-    # ── Card widget ───────────────────────────────────────────────────────────
-
-    def _make_card(self, item: dict) -> QWidget:
-        card = QWidget()
-        card.setObjectName("BrowseCard")
-        card.setStyleSheet("""
-            QWidget#BrowseCard {
-                background: #2b2d31;
-                border: 1px solid #3d3f45;
-                border-radius: 8px;
-            }
-            QWidget#BrowseCard:hover { border-color: #5865f2; }
-        """)
-        card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-
-        type_icons = {"note": "📝", "task": "✓", "reminder": "⏰", "snippet": "📋"}
-        icon = QLabel(type_icons.get(item.get("type", "note"), "📝"))
-        icon.setFixedWidth(24)
-        layout.addWidget(icon)
-
-        content = QLabel(str(item.get("content", ""))[:120])
-        content.setWordWrap(True)
-        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        layout.addWidget(content, stretch=1)
-
-        # Click handler
-        item_id = item.get("id", "")
-        item_type = item.get("type", "note")
-        card.mousePressEvent = lambda e, iid=item_id, it=item_type: self.item_selected.emit(iid, it)  # type: ignore[method-assign]
-
-        return card
+    @staticmethod
+    def _on_select(item: QListWidgetItem | None, detail: QTextEdit) -> None:
+        if item is not None:
+            detail.setPlainText(item.data(Qt.ItemDataRole.UserRole) or "")
+        else:
+            detail.clear()

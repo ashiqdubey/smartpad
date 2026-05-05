@@ -129,6 +129,18 @@ class FloatingPanel(QWidget):
         title = QLabel("SmartPad")
         title.setObjectName("HeaderTitle")
 
+        settings_btn = QPushButton("⚙")
+        settings_btn.setObjectName("SettingsButton")
+        settings_btn.setFixedSize(QSize(28, 28))
+        settings_btn.clicked.connect(self._open_settings)
+        settings_btn.setToolTip("Settings")
+
+        browse_btn = QPushButton("☰")
+        browse_btn.setObjectName("BrowseButton")
+        browse_btn.setFixedSize(QSize(28, 28))
+        browse_btn.clicked.connect(self._open_browse)
+        browse_btn.setToolTip("Notes & Tasks")
+
         close_btn = QPushButton("✕")
         close_btn.setObjectName("CloseButton")
         close_btn.setFixedSize(QSize(28, 28))
@@ -137,6 +149,8 @@ class FloatingPanel(QWidget):
 
         layout.addWidget(title)
         layout.addStretch()
+        layout.addWidget(settings_btn)
+        layout.addWidget(browse_btn)
         layout.addWidget(close_btn)
 
         # Make the header draggable
@@ -145,6 +159,20 @@ class FloatingPanel(QWidget):
         header.mouseReleaseEvent = self._header_mouse_release  # type: ignore[method-assign]
 
         return header
+
+    def _open_settings(self) -> None:
+        """Open the settings dialog."""
+        from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
+
+        dlg = SettingsDialog(parent=self)
+        dlg.exec()
+
+    def _open_browse(self) -> None:
+        """Open the browse window."""
+        from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
+
+        dlg = BrowseWindow(parent=self)
+        dlg.exec()
 
     def _build_chat_area(self) -> QScrollArea:
         self._scroll = QScrollArea()
@@ -265,6 +293,7 @@ class FloatingPanel(QWidget):
         anim.start()
         self._hide_anim = anim
 
+    @pyqtSlot()
     def toggle_panel(self) -> None:
         """Toggle show/hide (called from hotkey)."""
         if self.isVisible():
@@ -347,6 +376,7 @@ class FloatingPanel(QWidget):
                 note.set_status("saved")
                 self._add_widget(note)
                 self._set_status("Note saved")
+                self._save_note_to_db(result.body)
             case ActionKind.SAVE_TASK:
                 task = TaskBubble(
                     task_id=str(uuid.uuid4()),
@@ -355,24 +385,32 @@ class FloatingPanel(QWidget):
                 task.set_status("saved")
                 self._add_widget(task)
                 self._set_status("Task saved")
+                self._save_task_to_db(result.body)
             case ActionKind.SAVE_REMINDER:
                 reminder = ReminderBubble(content=result.body)
                 reminder.set_status("saved")
                 self._add_widget(reminder)
                 self._set_status("Reminder set")
+                self._save_reminder_to_db(result.body)
             case ActionKind.SAVE_SNIPPET:
                 snippet = SnippetBubble(content=result.body)
                 snippet.set_status("saved")
                 self._add_widget(snippet)
                 self._set_status("Snippet saved")
+                self._save_snippet_to_db(result.body)
             case ActionKind.APP_COMMAND:
-                app_action = result.metadata.get("app_action", "unknown")
-                ai_bubble = ChatBubble(
-                    role="assistant",
-                    text=f"Command: /{app_action} (not yet implemented)",
-                )
-                ai_bubble.set_status("saved")
-                self._add_widget(ai_bubble)
+                app_action = result.metadata.get("app_action", "")
+                if app_action == "settings":
+                    self._open_settings()
+                elif app_action in ("browse", "notes", "snippets"):
+                    self._open_browse()
+                else:
+                    self._add_widget(
+                        ChatBubble(
+                            role="assistant",
+                            text=f"/{app_action} — use the buttons in the header.",
+                        )
+                    )
             case ActionKind.QUERY_DB:
                 ai_bubble = ChatBubble(
                     role="assistant",
@@ -428,26 +466,213 @@ class FloatingPanel(QWidget):
         self._pool.submit_high(_stream_to_list(), job_id=job_id)
 
     def _get_provider(self) -> Any:
-        """Instantiate OpenAICompatibleProvider from env/settings if possible."""
-        from smartpad.providers.openai_compatible import OpenAICompatibleProvider  # noqa: PLC0415
+        """Instantiate an AI provider, checking keyring first then env vars."""
+        import keyring  # noqa: PLC0415
 
-        base_url = os.environ.get(
-            "SMARTPAD_OPENAI_BASE_URL",
-            getattr(self._settings, "openai_base_url", "") or "",
-        )
-        api_key = os.environ.get(
-            "SMARTPAD_OPENAI_API_KEY",
-            getattr(self._settings, "openai_api_key", "") or "",
-        )
+        _SVC = "smartpad"
 
-        if not base_url:
-            return None
+        def _kr(key: str) -> str:
+            """Read from keyring, returning '' on any error (incl. no backend)."""
+            try:
+                return keyring.get_password(_SVC, key) or ""
+            except Exception:
+                return ""
 
-        return OpenAICompatibleProvider(
-            base_url=base_url,
-            api_key=api_key or None,
-            name="openai",
+        # Check which keys are available (keyring first, then env vars)
+        anthropic_key = _kr("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
+        openai_key = _kr("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+        openai_url = (
+            _kr("openai_base_url")
+            or os.environ.get("OPENAI_BASE_URL", "")
+            or os.environ.get("SMARTPAD_OPENAI_BASE_URL", "")
         )
+        google_key = _kr("google_api_key") or os.environ.get("GOOGLE_API_KEY", "")
+        local_url = _kr("local_server_url") or os.environ.get("LOCAL_SERVER_URL", "")
+        preferred = _kr("preferred_provider")
+
+        # Honor explicit preference first
+        if preferred == "anthropic" and anthropic_key:
+            from smartpad.providers.anthropic import AnthropicProvider  # noqa: PLC0415
+
+            return AnthropicProvider(api_key=anthropic_key)
+        if preferred == "google" and google_key:
+            from smartpad.providers.google import GoogleProvider  # noqa: PLC0415
+
+            return GoogleProvider(api_key=google_key)
+        if preferred in ("openai", "openai_compatible") and (openai_key or openai_url):
+            from smartpad.providers.openai_compatible import (
+                OpenAICompatibleProvider,  # noqa: PLC0415
+            )
+
+            return OpenAICompatibleProvider(
+                base_url=openai_url or "https://api.openai.com/v1",
+                api_key=openai_key or None,
+                name="openai",
+            )
+        if preferred == "local" and local_url:
+            from smartpad.providers.openai_compatible import (
+                OpenAICompatibleProvider,  # noqa: PLC0415
+            )
+
+            return OpenAICompatibleProvider(
+                base_url=local_url, api_key=None, name="local"
+            )
+
+        # Fall back: first available key wins
+        if anthropic_key:
+            from smartpad.providers.anthropic import AnthropicProvider  # noqa: PLC0415
+
+            return AnthropicProvider(api_key=anthropic_key)
+        if openai_key or openai_url:
+            from smartpad.providers.openai_compatible import (
+                OpenAICompatibleProvider,  # noqa: PLC0415
+            )
+
+            return OpenAICompatibleProvider(
+                base_url=openai_url or "https://api.openai.com/v1",
+                api_key=openai_key or None,
+                name="openai",
+            )
+        if google_key:
+            from smartpad.providers.google import GoogleProvider  # noqa: PLC0415
+
+            return GoogleProvider(api_key=google_key)
+        if local_url:
+            from smartpad.providers.openai_compatible import (
+                OpenAICompatibleProvider,  # noqa: PLC0415
+            )
+
+            return OpenAICompatibleProvider(
+                base_url=local_url, api_key=None, name="local"
+            )
+        return None
+
+    # ── DB save helpers (fire-and-forget background threads) ──────────────────
+
+    def _save_note_to_db(self, content: str) -> None:
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        async def _do() -> None:
+            try:
+                import uuid as _uuid  # noqa: PLC0415
+                from datetime import UTC, datetime  # noqa: PLC0415
+
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.models import Note  # noqa: PLC0415
+                from smartpad.db.repositories.notes import NotesRepo  # noqa: PLC0415
+
+                async with get_async_session() as s:
+                    await NotesRepo(s).save(
+                        Note(
+                            id=str(_uuid.uuid4()),
+                            content=content,
+                            original_content=content,
+                            created_at=datetime.now(UTC),
+                            sync_version=0,
+                        )
+                    )
+            except Exception as exc:
+                logger.error("DB note save failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
+
+    def _save_task_to_db(self, content: str) -> None:
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        async def _do() -> None:
+            try:
+                import uuid as _uuid  # noqa: PLC0415
+                from datetime import UTC, datetime  # noqa: PLC0415
+
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.models import Task  # noqa: PLC0415
+                from smartpad.db.repositories.tasks import TasksRepo  # noqa: PLC0415
+
+                async with get_async_session() as s:
+                    await TasksRepo(s).save(
+                        Task(
+                            id=str(_uuid.uuid4()),
+                            content=content,
+                            status="todo",
+                            created_at=datetime.now(UTC),
+                            sync_version=0,
+                        )
+                    )
+            except Exception as exc:
+                logger.error("DB task save failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
+
+    def _save_reminder_to_db(self, content: str) -> None:
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        async def _do() -> None:
+            try:
+                import uuid as _uuid  # noqa: PLC0415
+                from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.models import Reminder  # noqa: PLC0415
+                from smartpad.db.repositories.reminders import RemindersRepo  # noqa: PLC0415
+
+                # Try to parse a time from the content; fall back to 1 hour from now
+                trigger_at: datetime | None = None
+                try:
+                    import dateparser  # noqa: PLC0415
+
+                    parsed = dateparser.parse(content, settings={"PREFER_DATES_FROM": "future"})
+                    if parsed is not None:
+                        trigger_at = parsed.astimezone(UTC)
+                except Exception:
+                    pass
+                if trigger_at is None:
+                    trigger_at = datetime.now(UTC) + timedelta(hours=1)
+
+                async with get_async_session() as s:
+                    await RemindersRepo(s).save(
+                        Reminder(
+                            id=str(_uuid.uuid4()),
+                            content=content,
+                            trigger_at=trigger_at,
+                            notified=False,
+                            created_at=datetime.now(UTC),
+                            sync_version=0,
+                        )
+                    )
+            except Exception as exc:
+                logger.error("DB reminder save failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
+
+    def _save_snippet_to_db(self, content: str) -> None:
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        async def _do() -> None:
+            try:
+                import uuid as _uuid  # noqa: PLC0415
+                from datetime import UTC, datetime  # noqa: PLC0415
+
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.models import Snippet  # noqa: PLC0415
+                from smartpad.db.repositories.snippets import SnippetsRepo  # noqa: PLC0415
+
+                async with get_async_session() as s:
+                    await SnippetsRepo(s).save(
+                        Snippet(
+                            id=str(_uuid.uuid4()),
+                            content=content,
+                            created_at=datetime.now(UTC),
+                            sync_version=0,
+                        )
+                    )
+            except Exception as exc:
+                logger.error("DB snippet save failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
 
     # ── Worker pool callbacks ─────────────────────────────────────────────────
 

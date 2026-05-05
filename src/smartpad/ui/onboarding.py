@@ -1,204 +1,288 @@
-"""Onboarding flow — SPEC.MD section 11.
-
-Four-tier AI setup wizard followed by 3-card walkthrough.
-Shown on first launch (settings key 'onboarding_complete' not set).
-"""
-
+"""First-run onboarding wizard."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+import keyring
+from loguru import logger
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from smartpad.config import load_settings
 
-class OnboardingDialog(QDialog):
-    """First-run wizard.
+_SVC = "smartpad"
 
-    Signals:
-        setup_complete(str): emitted when onboarding finishes.
-            Value is the chosen setup type:
-            "quick_start" | "ollama" | "cloud" | "advanced" | "skip"
-    """
 
-    setup_complete = pyqtSignal(str)
-
-    def __init__(self, detected_ollama: bool = False, parent: QWidget | None = None) -> None:
+class OnboardingWizard(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Welcome to SmartPad")
-        self.setFixedSize(480, 420)
-        self.setModal(True)
-        self._detected_ollama = detected_ollama
-        self._choice: str = "skip"
-        self._build_ui()
+        self.setMinimumSize(500, 380)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
+        self._settings = load_settings()
+        self._setup_ui()
 
-    # ── Build ─────────────────────────────────────────────────────────────────
-
-    def _build_ui(self) -> None:
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
         self._stack = QStackedWidget()
-        layout.addWidget(self._stack)
-
-        self._stack.addWidget(self._build_setup_page())
-        self._stack.addWidget(self._build_walkthrough_page())
-
-    # ── Page 1: AI setup ──────────────────────────────────────────────────────
-
-    def _build_setup_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 24, 32, 16)
-        layout.setSpacing(12)
-
-        title = QLabel("Welcome to SmartPad 👋")
-        title.setObjectName("OnboardingTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = title.font()
-        font.setPointSize(18)
-        font.setBold(True)
-        title.setFont(font)
-        layout.addWidget(title)
-
-        subtitle = QLabel("How would you like to set up your AI?")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
-        layout.addSpacing(8)
-
-        def _option_btn(emoji: str, title: str, desc: str, key: str) -> QPushButton:
-            btn = QPushButton(f"{emoji}  {title}\n{desc}")
-            btn.setObjectName("OnboardingOption")
-            btn.setFixedHeight(64)
-            btn.setStyleSheet("""
-                QPushButton {
-                    text-align: left;
-                    padding: 8px 16px;
-                    border: 1px solid #3d3f45;
-                    border-radius: 8px;
-                    background: #2b2d31;
-                    color: #dcddde;
-                    font-size: 13px;
-                }
-                QPushButton:hover { background: #36393f; border-color: #5865f2; }
-                QPushButton:pressed { background: #5865f2; }
-            """)
-            btn.clicked.connect(lambda: self._choose(key))
-            return btn
-
-        layout.addWidget(_option_btn(
-            "✨", "Quick start (recommended)",
-            "Download a small AI — runs locally, free, no setup",
-            "quick_start",
-        ))
-
-        ollama_label = "Use Ollama (detected)" if self._detected_ollama else "Use Ollama / LM Studio"
-        layout.addWidget(_option_btn(
-            "🔌", ollama_label,
-            "Use models you already have running",
-            "ollama",
-        ))
-
-        layout.addWidget(_option_btn(
-            "☁️", "Use a cloud API",
-            "OpenAI, Anthropic Claude, Google Gemini, OpenRouter",
-            "cloud",
-        ))
-
-        layout.addWidget(_option_btn(
-            "⚙️", "Advanced setup",
-            "Custom endpoint, vLLM, remote server",
-            "advanced",
-        ))
-
-        skip = QPushButton("Skip for now →")
-        skip.setFlat(True)
-        skip.clicked.connect(lambda: self._choose("skip"))
-        layout.addWidget(skip, alignment=Qt.AlignmentFlag.AlignRight)
-        return page
-
-    # ── Page 2: Walkthrough ───────────────────────────────────────────────────
-
-    def _build_walkthrough_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 24, 32, 16)
-        layout.setSpacing(16)
-
-        cards = [
-            ("⌨️  Open anywhere", "Press Ctrl+Alt+Space to open SmartPad from any app."),
-            ("💬  Capture anything", "Type a question, note, task, or reminder. SmartPad organises it automatically."),
-            ("🔍  Use slash commands", "Type / to see all commands: /note, /task, /remind, /find, and more."),
-        ]
-
-        self._card_stack = QStackedWidget()
-        self._card_idx = 0
-
-        for title, desc in cards:
-            card = QWidget()
-            card.setStyleSheet("background: #2b2d31; border-radius: 12px;")
-            cl = QVBoxLayout(card)
-            cl.setContentsMargins(24, 24, 24, 24)
-            t = QLabel(title)
-            t.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
-            d = QLabel(desc)
-            d.setWordWrap(True)
-            d.setStyleSheet("color: #b9bbbe;")
-            cl.addWidget(t)
-            cl.addWidget(d)
-            self._card_stack.addWidget(card)
-
-        layout.addWidget(self._card_stack, stretch=1)
+        self._stack.addWidget(self._page_welcome())
+        self._stack.addWidget(self._page_provider())
+        self._stack.addWidget(self._page_hotkey())
+        self._stack.addWidget(self._page_done())
+        layout.addWidget(self._stack, stretch=1)
 
         nav = QHBoxLayout()
-        self._back_btn = QPushButton("← Back")
-        self._back_btn.clicked.connect(self._prev_card)
-        self._next_btn = QPushButton("Next →")
-        self._next_btn.clicked.connect(self._next_card)
-        self._dots = QLabel("● ○ ○")
-        self._dots.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._back_btn = QPushButton("Back")
+        self._back_btn.clicked.connect(self._go_back)
+        self._next_btn = QPushButton("Next")
+        self._next_btn.setDefault(True)
+        self._next_btn.clicked.connect(self._go_next)
         nav.addWidget(self._back_btn)
-        nav.addWidget(self._dots, stretch=1)
+        nav.addStretch()
+        self._page_indicator = QLabel("Step 1 of 4")
+        self._page_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav.addWidget(self._page_indicator)
+        nav.addStretch()
         nav.addWidget(self._next_btn)
         layout.addLayout(nav)
         self._update_nav()
-        return page
 
-    # ── Navigation ────────────────────────────────────────────────────────────
+    def _page_welcome(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("Welcome to SmartPad")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: bold; margin: 20px 0;")
+        desc = QLabel(
+            "SmartPad is your floating AI second brain.\n"
+            "Press a hotkey from any app to capture notes, tasks,\n"
+            "reminders, and snippets — all stored locally.\n\n"
+            "Let's get you set up in a few steps."
+        )
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addStretch()
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        layout.addStretch()
+        return w
 
-    def _choose(self, key: str) -> None:
-        self._choice = key
-        self._card_idx = 0
-        self._card_stack.setCurrentIndex(0)
-        self._update_nav()
-        self._stack.setCurrentIndex(1)
+    def _page_provider(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        title = QLabel("Choose your AI provider")
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        layout.addWidget(title)
 
-    def _prev_card(self) -> None:
-        if self._card_idx > 0:
-            self._card_idx -= 1
-            self._card_stack.setCurrentIndex(self._card_idx)
-            self._update_nav()
+        self._provider_combo = QComboBox()
+        self._provider_combo.addItems(
+            [
+                "Anthropic (Claude)",
+                "OpenAI / Compatible",
+                "Google (Gemini)",
+                "Local (Ollama / LM Studio)",
+                "Skip for now",
+            ]
+        )
+        self._provider_combo.currentIndexChanged.connect(self._update_provider_fields)
+        layout.addWidget(self._provider_combo)
 
-    def _next_card(self) -> None:
-        n = self._card_stack.count()
-        if self._card_idx < n - 1:
-            self._card_idx += 1
-            self._card_stack.setCurrentIndex(self._card_idx)
-            self._update_nav()
+        self._key_label = QLabel("API Key:")
+        self._key_field = QLineEdit()
+        self._key_field.setEchoMode(QLineEdit.EchoMode.Password)
+        self._key_field.setPlaceholderText("Paste your API key here")
+        layout.addWidget(self._key_label)
+        layout.addWidget(self._key_field)
+
+        self._url_label = QLabel("Server URL:")
+        self._url_field = QLineEdit()
+        self._url_field.setPlaceholderText("http://localhost:11434")
+        layout.addWidget(self._url_label)
+        layout.addWidget(self._url_field)
+
+        self._model_label = QLabel("Model (optional):")
+        self._model_field = QLineEdit()
+        self._model_field.setPlaceholderText("gpt-4o-mini / llama3.2:3b")
+        layout.addWidget(self._model_label)
+        layout.addWidget(self._model_field)
+
+        self._hint = QLabel("")
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(self._hint)
+
+        layout.addStretch()
+        self._update_provider_fields(0)
+        return w
+
+    def _update_provider_fields(self, idx: int) -> None:
+        provider = self._provider_combo.currentText()
+        show_key = "Skip" not in provider and "Local" not in provider
+        show_url = "Compatible" in provider or "Local" in provider
+        show_model = "Compatible" in provider or "Local" in provider
+        self._key_label.setVisible(show_key)
+        self._key_field.setVisible(show_key)
+        self._url_label.setVisible(show_url)
+        self._url_field.setVisible(show_url)
+        self._model_label.setVisible(show_model)
+        self._model_field.setVisible(show_model)
+        hints = {
+            "Anthropic": "Get your key at console.anthropic.com → API Keys",
+            "OpenAI": (
+                "Get your key at platform.openai.com → API keys.\n"
+                "For a custom server, also enter the base URL."
+            ),
+            "Google": "Get your key at aistudio.google.com → Get API key",
+            "Local": (
+                "Start Ollama (ollama serve) or LM Studio first,\n"
+                "then enter the server URL."
+            ),
+            "Skip": "You can configure a provider later in Settings.",
+        }
+        for k, v in hints.items():
+            if k in provider:
+                self._hint.setText(v)
+                break
+
+    def _page_hotkey(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        title = QLabel("Set your global hotkey")
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        layout.addWidget(title)
+
+        desc = QLabel(
+            "This key combination summons the SmartPad panel from any application.\n"
+            "Use + to separate keys, e.g.  ctrl+alt+space  or  ctrl+shift+space"
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        self._hotkey_field = QLineEdit(self._settings.hotkey)
+        self._hotkey_field.setPlaceholderText("ctrl+alt+space")
+        layout.addWidget(self._hotkey_field)
+
+        import sys
+
+        if sys.platform == "darwin":
+            note = QLabel(
+                "macOS requires Accessibility permission:\n"
+                "System Settings → Privacy & Security → Accessibility → enable SmartPad."
+            )
+            note.setWordWrap(True)
+            note.setStyleSheet("color: orange; font-size: 11px;")
+            layout.addWidget(note)
+
+        layout.addStretch()
+        return w
+
+    def _page_done(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("You're all set!")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: bold; margin: 20px 0;")
+        desc = QLabel(
+            "SmartPad is ready to use.\n\n"
+            "Press your hotkey or click the tray icon to open the panel.\n"
+            "Type anything to chat, or use /note /task /remind /snippet\n"
+            "to save items directly."
+        )
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addStretch()
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        layout.addStretch()
+        return w
+
+    def _go_next(self) -> None:
+        idx = self._stack.currentIndex()
+        if idx == 1:
+            self._save_provider()
+        elif idx == 2:
+            self._save_hotkey()
+        if idx < self._stack.count() - 1:
+            self._stack.setCurrentIndex(idx + 1)
         else:
-            self.setup_complete.emit(self._choice)
             self.accept()
+        self._update_nav()
+
+    def _go_back(self) -> None:
+        idx = self._stack.currentIndex()
+        if idx > 0:
+            self._stack.setCurrentIndex(idx - 1)
+        self._update_nav()
 
     def _update_nav(self) -> None:
-        n = self._card_stack.count()
-        i = self._card_idx
-        self._back_btn.setEnabled(i > 0)
-        self._next_btn.setText("Get started →" if i == n - 1 else "Next →")
-        dots = " ".join("●" if j == i else "○" for j in range(n))
-        self._dots.setText(dots)
+        idx = self._stack.currentIndex()
+        total = self._stack.count()
+        self._back_btn.setEnabled(idx > 0)
+        self._next_btn.setText("Finish" if idx == total - 1 else "Next")
+        self._page_indicator.setText(f"Step {idx + 1} of {total}")
+
+    def _save_provider(self) -> None:
+        provider = self._provider_combo.currentText()
+        if "Skip" in provider:
+            return
+        key = self._key_field.text().strip()
+        url = self._url_field.text().strip()
+        model = self._model_field.text().strip()
+        if "Anthropic" in provider and key:
+            keyring.set_password(_SVC, "anthropic_api_key", key)
+            keyring.set_password(_SVC, "preferred_provider", "anthropic")
+        elif "OpenAI" in provider:
+            if key:
+                keyring.set_password(_SVC, "openai_api_key", key)
+            if url:
+                keyring.set_password(_SVC, "openai_base_url", url)
+            if model:
+                keyring.set_password(_SVC, "openai_model", model)
+            keyring.set_password(_SVC, "preferred_provider", "openai")
+        elif "Google" in provider and key:
+            keyring.set_password(_SVC, "google_api_key", key)
+            keyring.set_password(_SVC, "preferred_provider", "google")
+        elif "Local" in provider and url:
+            keyring.set_password(_SVC, "local_server_url", url)
+            if model:
+                keyring.set_password(_SVC, "local_model", model)
+            keyring.set_password(_SVC, "preferred_provider", "local")
+        logger.info("Onboarding: provider saved.")
+
+    def _save_hotkey(self) -> None:
+        hotkey = self._hotkey_field.text().strip()
+        if hotkey:
+            self._settings.hotkey = hotkey
+            try:
+                self._settings.save()
+            except Exception as exc:
+                logger.warning("Could not save hotkey: {}", exc)
+
+
+def needs_onboarding() -> bool:
+    """Return True if no provider is configured yet."""
+    import os
+
+    env_keys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "LOCAL_SERVER_URL"]
+    if any(os.environ.get(k) for k in env_keys):
+        return False
+    kr_keys = ["anthropic_api_key", "openai_api_key", "google_api_key", "local_server_url"]
+    for key in kr_keys:
+        try:
+            if keyring.get_password(_SVC, key):
+                return False
+        except Exception:
+            pass
+    return True

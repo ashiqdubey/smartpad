@@ -60,14 +60,24 @@ def run() -> None:
     logger.info("SmartPad starting — data dir: {}", DATA_DIR)
 
     # ── 3. Run DB migrations ──────────────────────────────────────────────────
+    db_path = DATA_DIR / "smartpad.db"
     try:
         from smartpad.db.migrations import run_migrations  # noqa: PLC0415
-        db_path = DATA_DIR / "smartpad.db"
+
         run_migrations(db_path)
         logger.info("Migrations complete.")
     except Exception as exc:
         # Non-fatal: app still runs; DB features may not work
         logger.exception("DB migration failed (non-fatal): {}", exc)
+
+    # ── 3b. Initialise async DB engine ────────────────────────────────────────
+    try:
+        from smartpad.db.engine import init_async_engine  # noqa: PLC0415
+
+        init_async_engine(db_path)
+        logger.info("Async DB engine initialised.")
+    except Exception as exc:
+        logger.exception("Async DB engine init failed (non-fatal): {}", exc)
 
     # ── 4. QApplication ───────────────────────────────────────────────────────
     from PyQt6.QtWidgets import QApplication  # noqa: PLC0415
@@ -95,11 +105,25 @@ def run() -> None:
 
     # ── 8. Tray icon ──────────────────────────────────────────────────────────
     from smartpad.ui.tray import TrayIcon  # noqa: PLC0415
+
     tray = TrayIcon()
     tray.show_panel.connect(panel.toggle_panel)
     tray.quit_requested.connect(app.quit)
+    tray.open_settings.connect(lambda: _open_settings(panel))
+    tray.open_browse.connect(lambda: _open_browse(panel))
     tray.show()
     logger.debug("Tray icon shown.")
+
+    # ── 8b. Onboarding (first-run) ────────────────────────────────────────────
+    try:
+        from smartpad.ui.onboarding import OnboardingWizard, needs_onboarding  # noqa: PLC0415
+
+        if needs_onboarding():
+            logger.info("First run detected — showing onboarding wizard.")
+            wizard = OnboardingWizard()
+            wizard.exec()
+    except Exception as exc:
+        logger.warning("Onboarding check failed (non-fatal): {}", exc)
 
     # ── 9. Global hotkey ──────────────────────────────────────────────────────
     from smartpad.core.hotkey import HotkeyListener  # noqa: PLC0415
@@ -135,6 +159,22 @@ def run() -> None:
     pool.stop()
     logger.info("SmartPad exited with code {}.", exit_code)
     sys.exit(exit_code)
+
+
+def _open_settings(parent: object) -> None:
+    """Create and show the settings dialog."""
+    from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
+
+    dlg = SettingsDialog(parent=None)
+    dlg.exec()
+
+
+def _open_browse(parent: object) -> None:
+    """Create and show the browse window."""
+    from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
+
+    dlg = BrowseWindow(parent=None)
+    dlg.exec()
 
 
 def _settings_to_pynput(hotkey: str) -> str:
