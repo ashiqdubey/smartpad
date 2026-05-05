@@ -283,28 +283,57 @@ class FloatingPanel(QWidget):
 
     def _build_input_area(self) -> QWidget:
         area = QWidget()
-        area.setObjectName("InputArea")
 
-        layout = QHBoxLayout(area)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(area)
+        outer.setContentsMargins(10, 6, 10, 8)
+        outer.setSpacing(5)
+
+        # Composer frame (focus ring is applied here via QSS property)
+        self._composer_frame = QWidget()
+        self._composer_frame.setObjectName("ComposerFrame")
+        composer_layout = QHBoxLayout(self._composer_frame)
+        composer_layout.setContentsMargins(10, 6, 6, 6)
+        composer_layout.setSpacing(6)
 
         self._input = QTextEdit()
         self._input.setObjectName("MessageInput")
         self._input.setPlaceholderText("Ask anything… or type / for commands")
-        self._input.setFixedHeight(72)
+        self._input.setFixedHeight(62)
         self._input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input.installEventFilter(self)
 
         send_btn = QPushButton("➤")
         send_btn.setObjectName("SendButton")
-        send_btn.setFixedSize(QSize(40, 40))
+        send_btn.setFixedSize(QSize(30, 30))
         send_btn.setToolTip("Send  (Enter)")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
 
-        layout.addWidget(self._input)
-        layout.addWidget(send_btn)
+        composer_layout.addWidget(self._input)
+        composer_layout.addWidget(send_btn, alignment=Qt.AlignmentFlag.AlignBottom)
+
+        # Keyboard hint bar
+        hint_bar = QWidget()
+        hint_bar.setObjectName("ComposerHint")
+        hint_layout = QHBoxLayout(hint_bar)
+        hint_layout.setContentsMargins(2, 0, 2, 0)
+        hint_layout.setSpacing(3)
+
+        def _hint_pair(kbd: str, label: str) -> tuple:
+            k = QLabel(kbd)
+            k.setObjectName("HintKbd")
+            t = QLabel(label)
+            t.setObjectName("HintText")
+            return k, t
+
+        for kbd_text, lbl_text in [("↵ Enter", "send"), ("⇧ Shift+Enter", "new line"), ("/", "commands")]:
+            k, t = _hint_pair(kbd_text, lbl_text)
+            hint_layout.addWidget(k)
+            hint_layout.addWidget(t)
+        hint_layout.addStretch()
+
+        outer.addWidget(self._composer_frame)
+        outer.addWidget(hint_bar)
         return area
 
     def _build_status_bar(self) -> QLabel:
@@ -460,8 +489,8 @@ class FloatingPanel(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        painter.fillPath(path, QColor(12, 12, 20, 244))
+        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 18.0, 18.0)
+        painter.fillPath(path, QColor(22, 20, 34, 242))
         painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -471,6 +500,17 @@ class FloatingPanel(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
+        # Focus ring on the composer frame
+        if obj is self._input:
+            if event.type() == QEvent.Type.FocusIn:
+                self._composer_frame.setProperty("focused", True)
+                self._composer_frame.style().unpolish(self._composer_frame)
+                self._composer_frame.style().polish(self._composer_frame)
+            elif event.type() == QEvent.Type.FocusOut:
+                self._composer_frame.setProperty("focused", False)
+                self._composer_frame.style().unpolish(self._composer_frame)
+                self._composer_frame.style().polish(self._composer_frame)
+
         if obj is self._input and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             mods = event.modifiers()
