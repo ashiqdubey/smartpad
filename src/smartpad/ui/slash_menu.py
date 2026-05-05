@@ -54,7 +54,7 @@ class SlashMenu(QFrame):
     dismissed = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        super().__init__(parent)
         self.setObjectName("SlashMenu")
         self._setup_ui()
         self._populate(list(sorted(ALL_SLASH_COMMANDS)))

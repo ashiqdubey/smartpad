@@ -112,7 +112,15 @@ class BrowseWindow(QDialog):
         layout.addWidget(self._tabs)
 
         self._status = QLabel("Loading…")
-        layout.addWidget(self._status)
+
+        # Bottom bar: status + close button
+        bottom_row = QHBoxLayout()
+        bottom_row.addWidget(self._status, stretch=1)
+        close_btn = QPushButton("← Back to SmartPad")
+        close_btn.setFixedWidth(180)
+        close_btn.clicked.connect(self.close)
+        bottom_row.addWidget(close_btn)
+        layout.addLayout(bottom_row)
 
     def _load(self) -> None:
         self._status.setText("Loading…")

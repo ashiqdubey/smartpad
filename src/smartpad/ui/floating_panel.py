@@ -57,6 +57,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from PyQt6.QtCore import QThread
+
 from smartpad.config import SmartPadSettings, load_settings
 from smartpad.core.router import ActionKind, route
 from smartpad.core.worker_pool import WorkerPool
@@ -77,7 +79,7 @@ Rules you must follow without exception:
 - Keep replies concise — this is a floating panel, not a document editor
 - Use plain text by default; use markdown only when it genuinely helps (lists, code blocks)
 - When the user types something that sounds like a note, task, or reminder, remind them they can use /note, /task, or /remind to save it directly"""
-from smartpad.providers.base import ChatChunk, ChatMessage
+from smartpad.providers.base import ChatMessage
 from smartpad.ui.bubbles.chat_bubble import ChatBubble
 from smartpad.ui.bubbles.error_bubble import ErrorBubble
 from smartpad.ui.bubbles.note_bubble import NoteBubble
@@ -85,6 +87,53 @@ from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
 from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
 from smartpad.ui.bubbles.task_bubble import TaskBubble
 from smartpad.ui.slash_menu import SlashMenu
+
+class _ChatThread(QThread):
+    """QThread that streams LLM chunks and emits one signal per token."""
+
+    from PyQt6.QtCore import pyqtSignal as _sig
+    chunk_ready = _sig(str, str)   # job_id, delta
+    stream_done = _sig(str)        # job_id
+    stream_error = _sig(str, str)  # job_id, error_message
+
+    def __init__(
+        self,
+        job_id: str,
+        provider: Any,
+        messages: list,
+        model: str,
+        temperature: float,
+        parent: Any = None,
+    ) -> None:
+        super().__init__(parent)
+        self._job_id = job_id
+        self._provider = provider
+        self._messages = messages
+        self._model = model
+        self._temperature = temperature
+
+    def run(self) -> None:
+        import asyncio  # noqa: PLC0415
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._stream())
+        finally:
+            loop.close()
+
+    async def _stream(self) -> None:
+        try:
+            async for chunk in await self._provider.chat(
+                messages=self._messages,
+                model=self._model,
+                temperature=self._temperature,
+                stream=True,
+            ):
+                self.chunk_ready.emit(self._job_id, chunk.delta)
+            self.stream_done.emit(self._job_id)
+        except Exception as exc:
+            self.stream_error.emit(self._job_id, str(exc))
+
 
 # Module-level settings singleton to avoid re-instantiation during GC
 _settings: SmartPadSettings | None = None
@@ -587,44 +636,38 @@ class FloatingPanel(QWidget):
                 self._start_chat(result.body)
 
     def _start_chat(self, text: str) -> None:
-        """Build provider and stream response via worker pool."""
+        """Stream LLM response via a dedicated QThread (true per-token streaming)."""
         provider = self._get_provider()
         if provider is None:
-            err_bubble = ErrorBubble(
+            self._add_widget(ErrorBubble(
                 message=(
-                    "No provider configured. Set SMARTPAD_OPENAI_BASE_URL and "
-                    "SMARTPAD_OPENAI_API_KEY (or configure a provider in settings)."
+                    "No provider configured. Open Settings (⚙) to add an API key."
                 )
-            )
-            self._add_widget(err_bubble)
+            ))
             self._set_status("No provider configured")
             return
 
-        # AI bubble placeholder — will be filled as chunks arrive
         ai_bubble = ChatBubble(role="assistant", text="", streaming=True)
         self._add_widget(ai_bubble)
         self._set_status("Thinking…")
 
-        # Prepend system prompt — always first, never stored in history
         messages = [ChatMessage(role="system", content=_SYSTEM_PROMPT)] + list(self._chat_history)
         job_id = str(uuid.uuid4())
         self._pending_jobs[job_id] = ai_bubble
 
-        model = self._resolve_model()
-
-        async def _stream_to_list() -> list[ChatChunk]:
-            """Collect all chunks and return them so WorkerPool can emit result."""
-            chunks: list[ChatChunk] = []
-            async for chunk in await provider.chat(
-                messages=messages,
-                model=model,
-                temperature=self._settings.chat_temperature,
-                stream=True,
-            ):
-                chunks.append(chunk)
-            return chunks
-
-        self._pool.submit_high(_stream_to_list(), job_id=job_id)
+        thread = _ChatThread(
+            job_id=job_id,
+            provider=provider,
+            messages=messages,
+            model=self._resolve_model(),
+            temperature=self._settings.chat_temperature,
+            parent=self,
+        )
+        thread.chunk_ready.connect(self._on_chunk)
+        thread.stream_done.connect(self._on_stream_done)
+        thread.stream_error.connect(self._on_stream_error)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
 
     def _resolve_model(self) -> str:
         """Return the right model name based on the active provider."""
@@ -858,7 +901,7 @@ class FloatingPanel(QWidget):
 
         threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
 
-    # ── Worker pool callbacks ─────────────────────────────────────────────────
+    # ── Worker pool callbacks (used for non-chat jobs) ────────────────────────
 
     def _connect_pool(self) -> None:
         self._pool.result_ready.connect(self._on_job_result)
@@ -867,21 +910,9 @@ class FloatingPanel(QWidget):
     @pyqtSlot(str, object)
     def _on_job_result(self, job_id: str, result: Any) -> None:
         bubble = self._pending_jobs.pop(job_id, None)
-        if bubble is None:
-            return
-
-        if isinstance(result, list):
-            # Streaming chunks list from _stream_to_list
-            full_text = "".join(c.delta for c in result if isinstance(c, ChatChunk))
-            bubble.set_content(full_text)
+        if bubble is not None:
             bubble.finish_streaming()
-            self._chat_history.append(ChatMessage(role="assistant", content=full_text))
-        else:
-            bubble.set_content(str(result))
-            bubble.finish_streaming()
-
         self._set_status("Ready")
-        self._scroll_to_bottom()
 
     @pyqtSlot(str, object)
     def _on_job_error(self, job_id: str, exc: Any) -> None:
@@ -894,6 +925,37 @@ class FloatingPanel(QWidget):
         self._add_widget(ErrorBubble(message=f"Error: {exc}"))
         self._set_status("Error")
         logger.error("Worker job {} failed: {}", job_id, exc)
+
+    # ── Chat streaming callbacks (_ChatThread) ────────────────────────────────
+
+    @pyqtSlot(str, str)
+    def _on_chunk(self, job_id: str, delta: str) -> None:
+        bubble = self._pending_jobs.get(job_id)
+        if bubble is not None and delta:
+            bubble.append_text(delta)
+            self._scroll_to_bottom()
+
+    @pyqtSlot(str)
+    def _on_stream_done(self, job_id: str) -> None:
+        bubble = self._pending_jobs.pop(job_id, None)
+        if bubble is not None:
+            full_text = bubble.text
+            bubble.finish_streaming()
+            self._chat_history.append(ChatMessage(role="assistant", content=full_text))
+        self._set_status("Ready")
+        self._scroll_to_bottom()
+
+    @pyqtSlot(str, str)
+    def _on_stream_error(self, job_id: str, message: str) -> None:
+        pending_bubble = self._pending_jobs.pop(job_id, None)
+        if pending_bubble is not None:
+            idx = self._chat_layout.indexOf(pending_bubble)
+            if idx >= 0:
+                self._chat_layout.removeWidget(pending_bubble)
+                pending_bubble.deleteLater()
+        self._add_widget(ErrorBubble(message=f"Error: {message}"))
+        self._set_status("Error")
+        logger.error("Stream error for job {}: {}", job_id, message)
 
     # ── Bubble helpers ────────────────────────────────────────────────────────
 

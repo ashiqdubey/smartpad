@@ -145,8 +145,14 @@ class ChatBubble(BubbleBase):
         else:
             self._label.setText(self._base_text)
 
+    @property
+    def text(self) -> str:
+        return self._base_text
+
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
-        if self._role == "user" and self.width() > 0:
-            max_w = int(self.width() * 0.80)
-            self._bubble_frame.setMaximumWidth(max_w)
+        if self.width() > 0:
+            if self._role == "user":
+                self._bubble_frame.setMaximumWidth(int(self.width() * 0.80))
+            else:
+                self._bubble_frame.setMaximumWidth(int(self.width() * 0.95))
