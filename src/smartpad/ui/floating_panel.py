@@ -183,11 +183,11 @@ class FloatingPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumSize(440, 540)
 
-        # Drop shadow for depth (works without blur)
+        # Subtle neutral shadow — no colour tint
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(32)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 140))
+        shadow.setBlurRadius(22)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 55))
         self.setGraphicsEffect(shadow)
 
     def _build_ui(self) -> None:
@@ -298,7 +298,7 @@ class FloatingPanel(QWidget):
 
         send_btn = QPushButton("➤")
         send_btn.setObjectName("SendButton")
-        send_btn.setFixedSize(QSize(42, 42))
+        send_btn.setFixedSize(QSize(40, 40))
         send_btn.setToolTip("Send  (Enter)")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
@@ -461,7 +461,7 @@ class FloatingPanel(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        painter.fillPath(path, QColor(14, 14, 32, 235))
+        painter.fillPath(path, QColor(12, 12, 20, 244))
         painter.end()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
