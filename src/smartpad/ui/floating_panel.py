@@ -60,7 +60,7 @@ from smartpad.ui.bubbles.note_bubble import NoteBubble
 from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
 from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
 from smartpad.ui.bubbles.task_bubble import TaskBubble
-from smartpad.ui.slash_menu import SlashMenu  # noqa: F401 — imported for side-effects / future use
+from smartpad.ui.slash_menu import SlashMenu
 
 # Module-level settings singleton to avoid re-instantiation during GC
 _settings: SmartPadSettings | None = None
@@ -91,6 +91,7 @@ class FloatingPanel(QWidget):
         self._build_window()
         self._build_ui()
         self._apply_geometry()
+        self._setup_slash_menu()
         self._connect_pool()
 
         # Install event filter on application to detect click-outside
@@ -203,7 +204,7 @@ class FloatingPanel(QWidget):
 
         self._input = QTextEdit()
         self._input.setObjectName("MessageInput")
-        self._input.setPlaceholderText("Ask anything…")
+        self._input.setPlaceholderText("Ask anything… (type / for commands)")
         self._input.setFixedHeight(60)
         self._input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._input.installEventFilter(self)
@@ -267,6 +268,7 @@ class FloatingPanel(QWidget):
 
         self.setWindowOpacity(0.0)
         self.show()
+        self._enable_acrylic_blur()
         self.activateWindow()
         self._input.setFocus()
 
@@ -301,6 +303,47 @@ class FloatingPanel(QWidget):
         else:
             self.show_panel()
 
+    def _enable_acrylic_blur(self) -> None:
+        """Enable Windows 10/11 Acrylic blur behind the panel window."""
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            import ctypes.wintypes
+
+            class ACCENT_POLICY(ctypes.Structure):
+                _fields_ = [
+                    ("AccentState", ctypes.c_int),
+                    ("AccentFlags", ctypes.c_int),
+                    ("GradientColor", ctypes.c_int),
+                    ("AnimationId", ctypes.c_int),
+                ]
+
+            class WINDOWCOMPOSITIONATTRIBDATA(ctypes.Structure):
+                _fields_ = [
+                    ("Attribute", ctypes.c_int),
+                    ("Data", ctypes.c_void_p),
+                    ("SizeOfData", ctypes.c_size_t),
+                ]
+
+            accent = ACCENT_POLICY()
+            accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
+            accent.AccentFlags = 2
+            accent.GradientColor = 0xBB12122a  # ABGR semi-transparent dark blue
+
+            data = WINDOWCOMPOSITIONATTRIBDATA()
+            data.Attribute = 19  # WCA_ACCENT_POLICY
+            data.SizeOfData = ctypes.sizeof(accent)
+            data.Data = ctypes.cast(ctypes.addressof(accent), ctypes.c_void_p)
+
+            ctypes.windll.user32.SetWindowCompositionAttribute(  # type: ignore[attr-defined]
+                int(self.winId()), ctypes.byref(data)
+            )
+            logger.debug("Acrylic blur enabled.")
+        except Exception as exc:
+            logger.debug("Acrylic blur not available: {}", exc)
+
     # ── Event handling ────────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -310,13 +353,25 @@ class FloatingPanel(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        # Intercept Enter/Shift+Enter in the input box
         if obj is self._input and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             mods = event.modifiers()
-            if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+            # Route arrow keys + Enter to slash menu when it's visible
+            if self._slash_menu.isVisible():
+                if key == Qt.Key.Key_Up:
+                    self._slash_menu.move_selection(-1)
+                    return True
+                if key == Qt.Key.Key_Down:
+                    self._slash_menu.move_selection(1)
+                    return True
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (mods & Qt.KeyboardModifier.ShiftModifier):
+                    self._slash_menu.accept_selection()
+                    return True
+                if key == Qt.Key.Key_Escape:
+                    self._slash_menu.hide()
+                    return True
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if mods & Qt.KeyboardModifier.ShiftModifier:
-                    # Shift+Enter: insert newline
                     return False
                 self._on_send()
                 return True
@@ -346,6 +401,42 @@ class FloatingPanel(QWidget):
 
     def _header_mouse_release(self, event: Any) -> None:
         self._drag_pos = None
+
+    # ── Slash menu ────────────────────────────────────────────────────────────
+
+    def _setup_slash_menu(self) -> None:
+        self._slash_menu = SlashMenu(parent=self)
+        self._slash_menu.command_selected.connect(self._on_slash_selected)
+        self._slash_menu.dismissed.connect(self._slash_menu.hide)
+        self._input.textChanged.connect(self._update_slash_menu)
+
+    def _update_slash_menu(self) -> None:
+        text = self._input.toPlainText()
+        # Show menu only while typing the command (no space yet = still typing command word)
+        if text.startswith("/") and " " not in text:
+            self._slash_menu.update_filter(text.strip())
+            self._position_slash_menu()
+        else:
+            self._slash_menu.hide()
+
+    def _position_slash_menu(self) -> None:
+        # Place the menu above the input field, inside the panel
+        input_pos = self._input.mapTo(self, QPoint(0, 0))
+        menu_h = min(self._slash_menu.sizeHint().height(), 260)
+        menu_w = self._input.width()
+        x = input_pos.x()
+        y = input_pos.y() - menu_h - 6
+        self._slash_menu.setGeometry(x, y, menu_w, menu_h)
+        self._slash_menu.raise_()
+
+    def _on_slash_selected(self, command: str) -> None:
+        # Put the selected command in the input with a trailing space so user types content
+        self._input.setPlainText(command + " ")
+        cursor = self._input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._input.setTextCursor(cursor)
+        self._slash_menu.hide()
+        self._input.setFocus()
 
     # ── Send / routing ────────────────────────────────────────────────────────
 
