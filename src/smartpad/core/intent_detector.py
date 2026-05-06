@@ -68,23 +68,41 @@ ALL_SLASH_COMMANDS: frozenset[str] = (
 # ── Pattern tables ────────────────────────────────────────────────────────────
 
 _REMINDER_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"remind\s+me\s+to\b", re.I),
-    re.compile(r"remind\s+me\b", re.I),
-    re.compile(r"\breminder\s*:", re.I),
-    re.compile(r"\balert\s+me\b", re.I),
+    re.compile(r"^remind\s+me\s+to\b", re.I),
+    re.compile(r"^remind\s+me\b", re.I),
+    re.compile(r"^reminder\s*[:\-]\s*", re.I),
+    re.compile(r"^alert\s+me\b", re.I),
+    re.compile(r"^set\s+(a\s+)?reminder\b", re.I),
 ]
 
 _TASK_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^todo\s*:", re.I),
-    re.compile(r"^task\s*:", re.I),
+    re.compile(r"^todo\s*[:\-]\s*", re.I),
+    re.compile(r"^task\s*[:\-]\s*", re.I),
     re.compile(r"^\s*-\s+\[\s*\]"),          # markdown checkbox
+    re.compile(r"^add\s+(a\s+|the\s+)?task\b", re.I),
+    re.compile(r"^new\s+task\b", re.I),
     re.compile(r"\b(by|due|deadline)\s+\w+", re.I),
     re.compile(r"\bneed\s+to\b.{0,60}\bby\b", re.I),
 ]
 
+# NOTE patterns — natural language note commands. Always strip the prefix
+# in _strip_match so we save the user's content, not the verb.
+_NOTE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^note\s*[:\-]\s*", re.I),
+    re.compile(r"^write\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
+    re.compile(r"^add\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
+    re.compile(r"^make\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
+    re.compile(r"^save\s+(this\s+|it\s+)?(as\s+)?(a\s+)?note\s*[:\-]?\s*", re.I),
+    re.compile(r"^save\s+(this|it)\s+to\s+notes?\s*[:\-]?\s*", re.I),
+    re.compile(r"^note\s+down\s*[:\-]?\s*", re.I),
+    re.compile(r"^jot\s+(down|this)\s*[:\-]?\s*", re.I),
+    re.compile(r"^remember\s+(this|that)\s*[:\-]?\s*", re.I),
+    re.compile(r"^store\s+(this|it)\s*[:\-]?\s*", re.I),
+]
+
 _SNIPPET_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^snippet\s*:", re.I),
-    re.compile(r"^save\s*:", re.I),
+    re.compile(r"^snippet\s*[:\-]\s*", re.I),
+    re.compile(r"^save\s+(this\s+)?(as\s+)?(a\s+)?snippet\b", re.I),
     re.compile(r"^`{1,3}"),                   # starts with backtick(s)
     re.compile(r"^\$\s"),                      # shell command
     re.compile(r"^>\s"),                       # blockquote (often pasted cmd)
@@ -145,21 +163,42 @@ def detect(text: str) -> DetectionResult:
     # ── 2. Reminder patterns (check before task — "remind me to buy milk by 5pm"
     #       must be REMINDER not TASK) ──────────────────────────────────────────
     for pat in _REMINDER_PATTERNS:
-        if pat.search(stripped):
-            return DetectionResult(kind=IntentKind.REMINDER, body=stripped)
+        m = pat.search(stripped)
+        if m:
+            body = _strip_prefix(stripped, m)
+            return DetectionResult(kind=IntentKind.REMINDER, body=body)
+
+    # ── 2. Note patterns ("note: foo", "write the note: foo", etc.) ─────────
+    for pat in _NOTE_PATTERNS:
+        m = pat.match(stripped)
+        if m:
+            body = _strip_prefix(stripped, m)
+            if body:  # ignore bare "note:" with no content
+                return DetectionResult(kind=IntentKind.NOTE, body=body)
 
     # ── 2. Task patterns ──────────────────────────────────────────────────────
     for pat in _TASK_PATTERNS:
-        if pat.search(stripped):
-            return DetectionResult(kind=IntentKind.TASK, body=stripped)
+        m = pat.search(stripped)
+        if m:
+            body = _strip_prefix(stripped, m)
+            return DetectionResult(kind=IntentKind.TASK, body=body)
 
     # ── 2. Snippet patterns ───────────────────────────────────────────────────
     for pat in _SNIPPET_PATTERNS:
-        if pat.search(stripped):
-            return DetectionResult(kind=IntentKind.SNIPPET, body=stripped)
+        m = pat.search(stripped)
+        if m:
+            body = _strip_prefix(stripped, m)
+            return DetectionResult(kind=IntentKind.SNIPPET, body=body)
 
     # ── 4. Fallback → CHAT (LLM routing added in Phase 9) ────────────────────
     return DetectionResult(kind=IntentKind.CHAT, body=stripped)
+
+
+def _strip_prefix(text: str, match: re.Match[str]) -> str:
+    """Return text with the matched prefix removed (only when match was at start)."""
+    if match.start() == 0:
+        return text[match.end():].strip()
+    return text.strip()
 
 
 def get_slash_completions(prefix: str) -> list[str]:
