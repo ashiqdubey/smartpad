@@ -64,26 +64,37 @@ class ChatBubble(BubbleBase):
     def _build_ui(self) -> None:
         is_user = self._role == "user"
 
+        # Off-side gutter via Qt layout (NOT QSS) — this is what actually
+        # constrains the bubble so wordWrap fires reliably.
+        self._content_layout.setContentsMargins(
+            56 if is_user else 6,  # left
+            0,
+            6 if is_user else 56,  # right
+            0,
+        )
+
         if is_user:
             self._content_layout.addStretch()
 
         self._bubble_frame = QWidget(self._content_widget)
         self._bubble_frame.setObjectName("BubbleUser" if is_user else "BubbleAI")
+        # Maximum: prefer sizeHint but cap at maxWidth so layout shrinks the bubble
         self._bubble_frame.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
 
         inner = QHBoxLayout(self._bubble_frame)
-        inner.setContentsMargins(12, 8, 12, 8)
+        inner.setContentsMargins(2, 0, 2, 0)
         inner.setSpacing(0)
 
         self._label = QLabel()
         self._label.setWordWrap(True)
+        self._label.setMinimumWidth(0)  # critical: lets it shrink for wrap
         self._label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self._label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding
         )
         inner.addWidget(self._label)
 
@@ -151,8 +162,8 @@ class ChatBubble(BubbleBase):
 
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
-        if self.width() > 0:
-            if self._role == "user":
-                self._bubble_frame.setMaximumWidth(int(self.width() * 0.80))
-            else:
-                self._bubble_frame.setMaximumWidth(int(self.width() * 0.95))
+        if self.width() > 100:
+            # Reserve ~62px for the off-side gutter + small breathing room.
+            # The remaining width caps the bubble — wordWrap fires inside.
+            available = self.width() - 62 - 8
+            self._bubble_frame.setMaximumWidth(max(120, available))

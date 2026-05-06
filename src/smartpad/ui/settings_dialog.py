@@ -53,17 +53,12 @@ class SettingsDialog(QDialog):
         self._setup_ui()
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
+        # Solid rounded fill — gradients here caused tab-switch crashes on Windows
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        p.fillPath(path, QColor(22, 20, 34, 244))
-        # Soft accent glow at the top — sets the brand tone
-        from PyQt6.QtGui import QBrush, QRadialGradient
-        glow = QRadialGradient(self.width() / 2, 0, self.width() * 0.7)
-        glow.setColorAt(0.0, QColor(124, 110, 245, 60))
-        glow.setColorAt(1.0, QColor(124, 110, 245, 0))
-        p.fillPath(path, QBrush(glow))
+        p.fillPath(path, QColor(22, 20, 34, 247))
         p.end()
 
     def _setup_ui(self) -> None:

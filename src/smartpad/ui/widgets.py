@@ -351,4 +351,92 @@ class HourSlider(QWidget):
         p.end()
 
 
-__all__ = ["LogoMark", "ToggleSwitch", "SegmentedControl", "HourSlider"]
+class NoteCard(QWidget):
+    """Sticky-style note card — accent left bar, glyph, meta + content."""
+
+    def __init__(
+        self,
+        content: str,
+        when: str = "",
+        glyph: str = "✎",
+        accent: QColor | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._content = content
+        self._when = when
+        self._glyph = glyph
+        self._accent = QColor(accent) if accent else QColor(ACCENT)
+        self.setMinimumHeight(72)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
+        h = QHBoxLayout(self)
+        h.setContentsMargins(14, 10, 14, 10)
+        h.setSpacing(12)
+
+        # Accent glyph badge
+        badge = QWidget()
+        badge.setFixedSize(QSize(28, 28))
+
+        def _paint_badge(_evt, b=badge, a=self._accent, g=glyph):  # type: ignore[no-untyped-def]
+            p = QPainter(b)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            soft = QColor(a)
+            soft.setAlpha(40)
+            path = QPainterPath()
+            path.addRoundedRect(0.0, 0.0, 28.0, 28.0, 7.0, 7.0)
+            p.fillPath(path, QBrush(soft))
+            font = b.font()
+            font.setPixelSize(14)
+            font.setWeight(QFont.Weight.DemiBold)
+            p.setFont(font)
+            p.setPen(QPen(a))
+            p.drawText(b.rect(), int(Qt.AlignmentFlag.AlignCenter), g)
+            p.end()
+
+        badge.paintEvent = _paint_badge  # type: ignore[method-assign]
+        h.addWidget(badge)
+
+        # Body
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(2)
+
+        meta = QLabel(f"NOTE · {when}" if when else "NOTE")
+        meta.setObjectName("CardKicker")
+        body.addWidget(meta)
+
+        truncated = content if len(content) <= 200 else content[:197] + "…"
+        text = QLabel(truncated)
+        text.setObjectName("NoteCardText")
+        text.setWordWrap(True)
+        text.setMinimumWidth(0)
+        body.addWidget(text)
+
+        h.addLayout(body, stretch=1)
+
+    def paintEvent(self, event: object) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        # Card body
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, w, h, 12.0, 12.0)
+        bg = QColor(self._accent)
+        bg.setAlpha(20)
+        p.fillPath(path, QBrush(bg))
+        # Accent left bar (clipped to rounded edge)
+        bar_path = QPainterPath()
+        bar_path.addRoundedRect(0.0, 0.0, 3.0, h, 1.5, 1.5)
+        bar_color = QColor(self._accent)
+        bar_color.setAlpha(220)
+        p.fillPath(bar_path, QBrush(bar_color))
+        # Hairline border
+        p.setPen(QPen(QColor(self._accent.red(), self._accent.green(), self._accent.blue(), 50), 1.0))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), 11.5, 11.5)
+        p.end()
+
+
+__all__ = ["LogoMark", "ToggleSwitch", "SegmentedControl", "HourSlider", "NoteCard"]

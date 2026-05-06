@@ -1,16 +1,19 @@
-"""Slash command popup menu — SPEC.md section 7 + section 12.
-
-Appears above the input field when the user types "/".
-Filters as the user types, navigated with arrow keys, executed with Enter.
-Dismissed with Esc or when text no longer starts with "/".
-"""
-
+"""Slash command popup — futuristic glass list with icon glyph + name + desc."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QKeyEvent,
+    QPainter,
+    QPainterPath,
+)
 from PyQt6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QVBoxLayout,
@@ -19,38 +22,104 @@ from PyQt6.QtWidgets import (
 
 from smartpad.core.intent_detector import ALL_SLASH_COMMANDS, get_slash_completions
 
-# Human-readable descriptions for each command
-_COMMAND_DESCRIPTIONS: dict[str, str] = {
-    "/note": "Save a note",
-    "/task": "Save a task",
-    "/todo": "Save a task",
-    "/remind": "Set a reminder",
-    "/reminder": "Set a reminder",
-    "/snippet": "Save a code snippet",
-    "/snip": "Save a code snippet",
-    "/find": "Search your notes",
-    "/search": "Search your notes",
-    "/tasks": "List your tasks",
-    "/today": "Show today's items",
-    "/snippets": "Browse snippets",
-    "/notes": "Browse notes",
-    "/done": "Mark a task done",
-    "/remove": "Delete an item",
-    "/delete": "Delete an item",
-    "/clear": "Clear chat stream",
-    "/settings": "Open settings",
-    "/browse": "Open browse window",
-    "/model": "Change AI model",
-    "/help": "Show help",
-    "/ai": "AI level settings",
-    "/level": "AI level settings",
+# Description + glyph (single char) + accent tint per command.
+_COMMANDS: dict[str, tuple[str, str, str]] = {
+    "/note": ("Save a note", "✎", "#7c6ef5"),
+    "/task": ("Save a task", "✓", "#60a5fa"),
+    "/todo": ("Save a task", "✓", "#60a5fa"),
+    "/remind": ("Set a reminder", "⏰", "#fb923c"),
+    "/reminder": ("Set a reminder", "⏰", "#fb923c"),
+    "/snippet": ("Save a code snippet", "<>", "#34d399"),
+    "/snip": ("Save a code snippet", "<>", "#34d399"),
+    "/find": ("Search your notes", "⌕", "#a78bfa"),
+    "/search": ("Search your notes", "⌕", "#a78bfa"),
+    "/tasks": ("List your tasks", "≡", "#60a5fa"),
+    "/today": ("Show today's items", "◷", "#fb923c"),
+    "/snippets": ("Browse snippets", "<>", "#34d399"),
+    "/notes": ("Browse notes", "✎", "#7c6ef5"),
+    "/done": ("Mark a task done", "✓", "#34d399"),
+    "/remove": ("Delete an item", "✕", "#f87171"),
+    "/delete": ("Delete an item", "✕", "#f87171"),
+    "/clear": ("Clear chat stream", "∅", "#94a3b8"),
+    "/settings": ("Open settings", "⚙", "#94a3b8"),
+    "/browse": ("Open browse window", "▤", "#7c6ef5"),
+    "/model": ("Change AI model", "◆", "#c87ec8"),
+    "/help": ("Show help", "?", "#94a3b8"),
+    "/ai": ("AI level settings", "✦", "#c87ec8"),
+    "/level": ("AI level settings", "✦", "#c87ec8"),
 }
+
+
+class _SlashRow(QWidget):
+    """One row in the slash menu — icon glyph + command + description."""
+
+    ROW_HEIGHT = 38
+
+    def __init__(self, cmd: str, desc: str, glyph: str, tint: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._cmd = cmd
+        self._desc = desc
+        self._glyph = glyph
+        self._tint = QColor(tint)
+        self.setFixedHeight(self.ROW_HEIGHT)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 12, 0)
+        layout.setSpacing(10)
+
+        # Glyph badge (24×24 colored square)
+        self._badge = _Badge(self._glyph, self._tint)
+        layout.addWidget(self._badge)
+
+        name = QLabel(cmd)
+        name.setObjectName("SlashName")
+        layout.addWidget(name)
+
+        layout.addStretch()
+
+        d = QLabel(desc)
+        d.setObjectName("SlashDesc")
+        layout.addWidget(d)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(280, self.ROW_HEIGHT)
+
+
+class _Badge(QWidget):
+    """24×24 rounded-square badge with a single-char glyph in the accent tint."""
+
+    def __init__(self, glyph: str, tint: QColor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._glyph = glyph
+        self._tint = tint
+        self.setFixedSize(QSize(24, 24))
+
+    def paintEvent(self, event: object) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        # Soft tinted square
+        bg = QColor(self._tint)
+        bg.setAlpha(38)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, 24.0, 24.0, 6.0, 6.0)
+        p.fillPath(path, QBrush(bg))
+
+        # Glyph in accent
+        font = self.font()
+        font.setPixelSize(13)
+        font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(font)
+        p.setPen(self._tint)
+        p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignCenter), self._glyph)
+        p.end()
 
 
 class SlashMenu(QFrame):
     """Floating popup listing matching slash commands."""
 
-    command_selected = pyqtSignal(str)  # emits e.g. "/note"
+    command_selected = pyqtSignal(str)
     dismissed = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -63,21 +132,17 @@ class SlashMenu(QFrame):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def update_filter(self, prefix: str) -> None:
-        """Filter to commands matching prefix and show/hide accordingly."""
         if not prefix.startswith("/"):
             self.hide()
             return
-
         matches = get_slash_completions(prefix)
         if not matches:
             self.hide()
             return
-
         self._populate(matches)
         self.show()
 
     def move_selection(self, delta: int) -> None:
-        """Move selection by delta rows (±1). Wraps around."""
         count = self._list.count()
         if count == 0:
             return
@@ -85,7 +150,6 @@ class SlashMenu(QFrame):
         self._list.setCurrentRow((current + delta) % count)
 
     def accept_selection(self) -> None:
-        """Emit command_selected with the currently highlighted command."""
         item = self._list.currentItem()
         if item is not None:
             cmd = item.data(Qt.ItemDataRole.UserRole)
@@ -103,48 +167,26 @@ class SlashMenu(QFrame):
         layout.setSpacing(0)
 
         self._list = QListWidget()
+        self._list.setObjectName("SlashList")
         self._list.setFrameShape(QFrame.Shape.NoFrame)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setSpacing(0)
         self._list.itemActivated.connect(self._on_item_activated)
         self._list.itemClicked.connect(self._on_item_activated)
         layout.addWidget(self._list)
 
-        self.setStyleSheet("""
-            SlashMenu {
-                background: #2b2d31;
-                border: 1px solid #3d3f45;
-                border-radius: 6px;
-            }
-            QListWidget {
-                background: transparent;
-                color: #dcddde;
-                font-size: 13px;
-                padding: 4px;
-            }
-            QListWidget::item {
-                padding: 6px 10px;
-                border-radius: 4px;
-            }
-            QListWidget::item:selected {
-                background: #5865f2;
-                color: white;
-            }
-            QListWidget::item:hover {
-                background: #3d3f45;
-            }
-        """)
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(280)
         self.setMaximumHeight(280)
 
     def _populate(self, commands: list[str]) -> None:
         self._list.clear()
         for cmd in commands:
-            desc = _COMMAND_DESCRIPTIONS.get(cmd, "")
+            desc, glyph, tint = _COMMANDS.get(cmd, (cmd, "›", "#94a3b8"))
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, cmd)
-            # Display: "/command  — description"
-            item.setText(f"{cmd}  {desc}" if desc else cmd)
+            item.setSizeHint(QSize(280, _SlashRow.ROW_HEIGHT))
             self._list.addItem(item)
+            self._list.setItemWidget(item, _SlashRow(cmd, desc, glyph, tint))
         if self._list.count() > 0:
             self._list.setCurrentRow(0)
 
@@ -153,7 +195,7 @@ class SlashMenu(QFrame):
         self.command_selected.emit(cmd)
         self.hide()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.dismissed.emit()

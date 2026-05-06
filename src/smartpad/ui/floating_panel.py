@@ -251,18 +251,34 @@ class FloatingPanel(QWidget):
         return header
 
     def _open_settings(self) -> None:
-        """Open the settings dialog."""
+        """Open the settings dialog as an independent top-level window."""
         from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
 
-        dlg = SettingsDialog(parent=self)
-        dlg.exec()
+        existing = getattr(self, "_settings_dlg", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        dlg = SettingsDialog(parent=None)
+        self._settings_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _open_browse(self) -> None:
-        """Open the browse window."""
+        """Open the browse window as an independent top-level window."""
         from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
 
-        dlg = BrowseWindow(parent=self)
-        dlg.exec()
+        existing = getattr(self, "_browse_dlg", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        dlg = BrowseWindow(parent=None)
+        self._browse_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _build_chat_area(self) -> QScrollArea:
         self._scroll = QScrollArea()
@@ -518,6 +534,12 @@ class FloatingPanel(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
+        try:
+            return self._handle_event(obj, event)
+        except (RuntimeError, AttributeError, TypeError):
+            return False
+
+    def _handle_event(self, obj: Any, event: Any) -> bool:
         # Focus ring on the composer frame
         if obj is self._input:
             if event.type() == QEvent.Type.FocusIn:
@@ -996,12 +1018,76 @@ class FloatingPanel(QWidget):
     @pyqtSlot(str)
     def _on_stream_done(self, job_id: str) -> None:
         bubble = self._pending_jobs.pop(job_id, None)
+        full_text = ""
         if bubble is not None:
             full_text = bubble.text
             bubble.finish_streaming()
             self._chat_history.append(ChatMessage(role="assistant", content=full_text))
-        self._set_status("Ready")
+        # Look at the user's last message — if they asked to save, do it.
+        last_user = next(
+            (m.content for m in reversed(self._chat_history[:-1]) if m.role == "user"),
+            "",
+        )
+        save_kind = self._detect_save_intent(last_user)
+        if save_kind and full_text.strip():
+            self._auto_save_response(save_kind, full_text)
+        else:
+            self._set_status("Ready")
         self._scroll_to_bottom()
+
+    @staticmethod
+    def _detect_save_intent(prompt: str) -> str | None:
+        """Heuristic: did the user ask us to also save the response?
+
+        Returns one of "note" | "task" | "reminder" | None.
+        Avoids false positives on pure questions ("what should I save?") by
+        requiring an imperative phrasing.
+        """
+        p = prompt.lower()
+        # Strong phrases — clear save intent
+        note_phrases = [
+            "save it", "save this", "save as note", "save it as note",
+            "save it to notes", "save this to notes", "save to notes",
+            "store it", "store this", "make a note", "add a note",
+            "remember it", "save and store", "and save it", "and save this",
+        ]
+        task_phrases = [
+            "save as task", "save it as task", "make a task", "add a task",
+            "as a task", "to my tasks", "save to tasks",
+        ]
+        rem_phrases = [
+            "save as reminder", "remind me later", "as a reminder",
+            "save as a reminder", "to my reminders",
+        ]
+        if any(ph in p for ph in task_phrases):
+            return "task"
+        if any(ph in p for ph in rem_phrases):
+            return "reminder"
+        if any(ph in p for ph in note_phrases):
+            return "note"
+        return None
+
+    def _auto_save_response(self, kind: str, content: str) -> None:
+        """Save AI-generated content as a note/task/reminder, with confirmation."""
+        import uuid as _uuid  # noqa: PLC0415
+        if kind == "note":
+            bubble = NoteBubble(content=content, original_content=content)
+            bubble.set_status("saved")
+            self._add_widget(bubble)
+            self._save_note_to_db(content)
+            self._set_status("Saved as note ✓")
+        elif kind == "task":
+            bubble = TaskBubble(task_id=str(_uuid.uuid4()), content=content)
+            bubble.set_status("saved")
+            self._add_widget(bubble)
+            self._save_task_to_db(content)
+            self._set_status("Saved as task ✓")
+        elif kind == "reminder":
+            bubble = ReminderBubble(content=content)
+            bubble.set_status("saved")
+            self._add_widget(bubble)
+            self._save_reminder_to_db(content)
+            self._set_status("Saved as reminder ✓")
 
     @pyqtSlot(str, str)
     def _on_stream_error(self, job_id: str, message: str) -> None:

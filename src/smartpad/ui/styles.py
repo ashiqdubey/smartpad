@@ -106,7 +106,6 @@ QWidget {
     color: #ffffff;
     border-radius: 14px 14px 5px 14px;
     padding: 10px 14px;
-    margin: 0 14px 0 60px;
 }
 #BubbleUser QLabel {
     background-color: transparent;
@@ -120,7 +119,6 @@ QWidget {
     border: 1px solid rgba(240, 240, 248, 0.10);
     border-radius: 5px 14px 14px 14px;
     padding: 10px 14px;
-    margin: 0 60px 0 14px;
 }
 #BubbleAI QLabel {
     background-color: transparent;
@@ -384,6 +382,12 @@ QLabel {
     background-color: transparent;
 }
 
+#NoteCardText {
+    color: rgba(246, 246, 250, 0.92);
+    font-size: 13px;
+    background-color: transparent;
+}
+
 #SettingsTabs::pane {
     border: none;
     background-color: transparent;
@@ -524,20 +528,31 @@ QSplitter::handle { background-color: rgba(240, 240, 248, 0.06); width: 1px; }
 
 /* ── Slash menu ──────────────────────────────────────────────────────────────── */
 #SlashMenu {
-    background-color: rgba(20, 18, 32, 0.99);
+    background-color: rgba(20, 18, 32, 0.985);
     border: 1px solid rgba(240, 240, 248, 0.14);
     border-radius: 12px;
 }
-#SlashMenu QListWidget {
+#SlashList {
     background-color: transparent;
     border: none;
-    color: rgba(246, 246, 250, 0.82);
-    font-size: 13px;
-    padding: 4px;
+    padding: 5px;
+    outline: none;
 }
-#SlashMenu QListWidget::item { padding: 7px 12px; border-radius: 7px; color: rgba(246, 246, 250, 0.70); }
-#SlashMenu QListWidget::item:selected { background-color: rgba(124, 110, 245, 0.18); color: rgba(246, 246, 250, 1.0); }
-#SlashMenu QListWidget::item:hover:!selected { background-color: rgba(246, 246, 250, 0.05); }
+#SlashList::item { padding: 0; border-radius: 8px; margin: 1px; }
+#SlashList::item:selected { background-color: rgba(124, 110, 245, 0.20); }
+#SlashList::item:hover:!selected { background-color: rgba(246, 246, 250, 0.05); }
+#SlashName {
+    font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(246, 246, 250, 0.96);
+    background-color: transparent;
+}
+#SlashDesc {
+    font-size: 11.5px;
+    color: rgba(246, 246, 250, 0.45);
+    background-color: transparent;
+}
 """
 
 LIGHT_THEME = """
@@ -559,10 +574,10 @@ QLabel { background-color: transparent; color: #1a1830; }
 #ChatScrollArea QScrollBar::add-line:vertical, #ChatScrollArea QScrollBar::sub-line:vertical { height: 0; }
 #ChatContainer { background-color: transparent; }
 
-#BubbleUser { background-color: #7c6ef5; color: #fff; border-radius: 14px 14px 4px 14px; padding: 9px 13px; margin: 3px 10px 3px 50px; }
-#BubbleUser QLabel { background-color: transparent; color: #fff; }
-#BubbleAI { background-color: rgba(26,24,48,0.05); color: #1a1830; border: 1px solid rgba(26,24,48,0.08); border-radius: 4px 14px 14px 14px; padding: 9px 13px; margin: 3px 50px 3px 10px; }
-#BubbleAI QLabel { background-color: transparent; color: #1a1830; }
+#BubbleUser { background-color: #7c6ef5; color: #fff; border-radius: 14px 14px 5px 14px; padding: 10px 14px; }
+#BubbleUser QLabel { background-color: transparent; color: #fff; font-size: 13.5px; }
+#BubbleAI { background-color: rgba(26,24,48,0.05); color: #1a1830; border: 1px solid rgba(26,24,48,0.08); border-radius: 5px 14px 14px 14px; padding: 10px 14px; }
+#BubbleAI QLabel { background-color: transparent; color: #1a1830; font-size: 13.5px; }
 #BubbleNote { background-color: rgba(124,110,245,0.06); color: #3d2e99; border: 1px solid rgba(124,110,245,0.12); border-left: 2px solid rgba(124,110,245,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }
 #BubbleNote QLabel { background-color: transparent; }
 #BubbleTask { background-color: rgba(59,130,246,0.06); color: #1e3a8a; border: 1px solid rgba(59,130,246,0.12); border-left: 2px solid rgba(59,130,246,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }

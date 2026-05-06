@@ -6,7 +6,7 @@ from typing import Any
 
 from loguru import logger
 from PyQt6.QtCore import Qt, QPoint, QSize, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QRadialGradient  # noqa: F401
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from smartpad.ui.widgets import LogoMark
+from smartpad.ui.widgets import LogoMark, NoteCard
 
 
 class _DBLoader(QThread):
@@ -78,16 +78,12 @@ class BrowseWindow(QDialog):
         self._load()
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
+        # Solid rounded fill — gradients here caused tab-switch crashes on Windows
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        p.fillPath(path, QColor(22, 20, 34, 244))
-        from PyQt6.QtGui import QBrush, QRadialGradient
-        glow = QRadialGradient(self.width() / 2, 0, self.width() * 0.7)
-        glow.setColorAt(0.0, QColor(124, 110, 245, 60))
-        glow.setColorAt(1.0, QColor(124, 110, 245, 0))
-        p.fillPath(path, QBrush(glow))
+        p.fillPath(path, QColor(22, 20, 34, 247))
         p.end()
 
     def _setup_ui(self) -> None:
@@ -236,11 +232,17 @@ class BrowseWindow(QDialog):
             return not q or q in content.lower()
 
         self._notes_list.clear()
+        # Notes get the sticky-card treatment — feed style.
+        self._notes_list.setSpacing(6)
         for n in self._all_notes:
             if _match(n.content):
-                item = QListWidgetItem(n.content[:90] + ("…" if len(n.content) > 90 else ""))
+                when = self._humanize_time(getattr(n, "created_at", None))
+                card = NoteCard(content=n.content, when=when, glyph="✎", accent=QColor("#7c6ef5"))
+                item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, n.content)
+                item.setSizeHint(card.sizeHint())
                 self._notes_list.addItem(item)
+                self._notes_list.setItemWidget(item, card)
 
         self._tasks_list.clear()
         for t in self._all_tasks:
@@ -289,3 +291,25 @@ class BrowseWindow(QDialog):
             detail.setPlainText(item.data(Qt.ItemDataRole.UserRole) or "")
         else:
             detail.clear()
+
+    @staticmethod
+    def _humanize_time(ts: object) -> str:
+        if ts is None:
+            return ""
+        try:
+            from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+            now = datetime.now(UTC)
+            if hasattr(ts, "tzinfo") and ts.tzinfo is None:  # type: ignore[union-attr]
+                ts = ts.replace(tzinfo=UTC)  # type: ignore[union-attr]
+            delta = now - ts  # type: ignore[operator]
+            if delta < timedelta(minutes=1):
+                return "just now"
+            if delta < timedelta(hours=1):
+                return f"{int(delta.total_seconds() // 60)}m ago"
+            if delta < timedelta(days=1):
+                return f"{int(delta.total_seconds() // 3600)}h ago"
+            if delta < timedelta(days=7):
+                return f"{delta.days}d ago"
+            return ts.strftime("%b %d")  # type: ignore[union-attr]
+        except Exception:
+            return ""
