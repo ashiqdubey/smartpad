@@ -70,14 +70,14 @@ ALL_SLASH_COMMANDS: frozenset[str] = (
 _REMINDER_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^remind\s+me\s+to\b", re.I),
     re.compile(r"^remind\s+me\b", re.I),
-    re.compile(r"^reminder\s*[:\-]\s*", re.I),
+    re.compile(r"^reminder\s*[:\-–—]\s*", re.I),
     re.compile(r"^alert\s+me\b", re.I),
     re.compile(r"^set\s+(a\s+)?reminder\b", re.I),
 ]
 
 _TASK_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^todo\s*[:\-]\s*", re.I),
-    re.compile(r"^task\s*[:\-]\s*", re.I),
+    re.compile(r"^todo\s*[:\-–—]\s*", re.I),
+    re.compile(r"^task\s*[:\-–—]\s*", re.I),
     re.compile(r"^\s*-\s+\[\s*\]"),          # markdown checkbox
     re.compile(r"^add\s+(a\s+|the\s+)?task\b", re.I),
     re.compile(r"^new\s+task\b", re.I),
@@ -86,21 +86,34 @@ _TASK_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 # LITERAL note patterns — the user is providing the body directly.
-# Phrasings like "make/write a note about X" are intentionally NOT here:
-# those mean "generate a note, then save it" and are handled by the
-# compound-intent path in floating_panel after the AI streams.
+# Permissive about polite prefixes ("hey,", "can you", "please") and
+# accepts content on the same line OR after a newline. We slice the body
+# from the match end so newlines inside the user's content are preserved.
+# Generative phrasings ("make/write a note about X") are intentionally
+# NOT here: those go to CHAT → AI generates → compound-intent saves.
 _NOTE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^note\s*[:\-]\s+", re.I),                       # note: foo
-    re.compile(r"^remember\s+(this|that)\s*[:\-]\s+", re.I),     # remember this: foo
-    re.compile(r"^store\s+(this|it)\s*[:\-]\s+", re.I),          # store this: foo
-    re.compile(r"^jot\s+(down|this)\s*[:\-]\s+", re.I),          # jot down: foo
-    re.compile(r"^note\s+down\s*[:\-]\s+", re.I),                # note down: foo
-    re.compile(r"^save\s+(this\s+|it\s+)(as\s+)?(a\s+)?note\s*[:\-]?\s+", re.I),
-    re.compile(r"^save\s+(this|it)\s+to\s+notes?\s*[:\-]?\s+", re.I),
+    # "[hey,] [can you] [please|just|kindly] (note|remember|store|jot|save)
+    #   (this|that|it|down) [:|-]" — polite/conversational forms.
+    re.compile(
+        r"^(?:hey[,!\s]+)?"
+        r"(?:can\s+you\s+(?:please\s+)?)?"
+        r"(?:please\s+|just\s+|kindly\s+)?"
+        r"(?:note|remember|store|jot|save)"
+        r"\s+(?:this|that|it|down)\b\s*[:\-–—]?\s*",
+        re.I,
+    ),
+    # Direct colon forms — "note: foo", "remember: foo"
+    re.compile(r"^note\s*[:\-–—]\s*", re.I),
+    re.compile(r"^remember\s*[:\-–—]\s*", re.I),
+    # "jot down: foo" / "note down: foo"
+    re.compile(r"^(?:jot|note)\s+down\s*[:\-–—]?\s*", re.I),
+    # "save this/it as a note" / "save this/it to notes"
+    re.compile(r"^save\s+(?:this|it)\s+(?:as\s+)?(?:a\s+)?note\s*[:\-–—]?\s*", re.I),
+    re.compile(r"^save\s+(?:this|it)\s+to\s+notes?\s*[:\-–—]?\s*", re.I),
 ]
 
 _SNIPPET_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^snippet\s*[:\-]\s*", re.I),
+    re.compile(r"^snippet\s*[:\-–—]\s*", re.I),
     re.compile(r"^save\s+(this\s+)?(as\s+)?(a\s+)?snippet\b", re.I),
     re.compile(r"^`{1,3}"),                   # starts with backtick(s)
     re.compile(r"^\$\s"),                      # shell command
