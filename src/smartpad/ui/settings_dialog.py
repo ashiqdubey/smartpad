@@ -26,6 +26,7 @@ from smartpad.ui.widgets import HourSlider, LogoMark, SegmentedControl, ToggleSw
 _SVC = "smartpad"
 
 _AI_LEVEL_LABELS = ["Off", "Organise", "Grammar", "Tidy", "Enhance"]
+_LOG_LEVELS = ["ERROR", "WARNING", "INFO", "DEBUG"]
 
 
 def _kr(key: str) -> str:
@@ -158,6 +159,38 @@ class SettingsDialog(QDialog):
         ))
 
         layout.addWidget(card)
+
+        # DIAGNOSTICS card
+        diag = self._card("DIAGNOSTICS")
+        dl = diag.body  # type: ignore[attr-defined]
+
+        sub = QLabel("Log verbosity. Use DEBUG to capture detailed traces while reproducing a bug — switch back to INFO afterwards.")
+        sub.setObjectName("CardSub")
+        sub.setWordWrap(True)
+        dl.addWidget(sub)
+        dl.addSpacing(6)
+
+        current_level = (self._settings.log_level or "INFO").upper()
+        idx = _LOG_LEVELS.index(current_level) if current_level in _LOG_LEVELS else 2
+        self._log_level = SegmentedControl(_LOG_LEVELS, index=idx)
+        self._log_level.setMinimumHeight(34)
+        dl.addWidget(self._log_level)
+
+        # Log file path + open-folder hint
+        from smartpad.config import DATA_DIR  # noqa: PLC0415
+        log_path_label = QLabel(f"Log file: {DATA_DIR / 'logs' / 'smartpad.log'}")
+        log_path_label.setObjectName("CardSub")
+        log_path_label.setWordWrap(True)
+        log_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        dl.addSpacing(4)
+        dl.addWidget(log_path_label)
+
+        env_hint = QLabel("Override at launch with --debug or SMARTPAD_LOG_LEVEL=DEBUG.")
+        env_hint.setObjectName("CardSub")
+        env_hint.setWordWrap(True)
+        dl.addWidget(env_hint)
+
+        layout.addWidget(diag)
         layout.addStretch()
         return wrap
 
@@ -384,9 +417,19 @@ class SettingsDialog(QDialog):
         self._settings.startup_with_os = self._startup.isChecked()
         self._settings.quiet_hours_start = int(self._quiet_start.value())
         self._settings.quiet_hours_end = int(self._quiet_end.value())
+        new_log_level = _LOG_LEVELS[self._log_level.value()]
+        self._settings.log_level = new_log_level  # type: ignore[assignment]
         try:
             self._settings.save()
-            logger.info("Settings saved.")
+            logger.info("Settings saved. Log level → {} (effective on next launch).", new_log_level)
         except Exception as exc:
             logger.error("Could not save settings: {}", exc)
+        # Apply log level live so the user sees the change without restart.
+        try:
+            from smartpad.app import _configure_logging  # noqa: PLC0415
+            from smartpad.config import DATA_DIR  # noqa: PLC0415
+            _configure_logging(DATA_DIR, level=new_log_level)
+            logger.info("Log level applied: {}", new_log_level)
+        except Exception as exc:
+            logger.warning("Could not re-apply log level live: {}", exc)
         self.accept()

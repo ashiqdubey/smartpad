@@ -76,6 +76,7 @@ class SmartPadSettings(BaseSettings):
     # Panel / UI
     hotkey: str = "ctrl+alt+space"
     theme: Literal["dark", "light", "system"] = "system"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     ai_level: int = Field(default=1, ge=0, le=4)
     panel_position_x: int = -1  # -1 = use default (right-anchored)
     panel_position_y: int = 80

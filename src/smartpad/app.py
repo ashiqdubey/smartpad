@@ -1,7 +1,8 @@
 """Application entry point — SPEC.md section 22, step 6.
 
 Sets up:
-- loguru logging (rotating file + stderr)
+- loguru logging (rotating file + stderr) — level configurable via setting,
+  ``--debug`` CLI flag, or ``SMARTPAD_LOG_LEVEL`` env var
 - QApplication
 - DB migrations
 - WorkerPool
@@ -14,38 +15,57 @@ Exports run() which is called by __main__.py.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 from loguru import logger
 
 
-def _configure_logging(data_dir: Path) -> None:
-    """Set up loguru: stderr (INFO+) and rotating file (DEBUG+)."""
+_VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
+
+
+def _resolve_log_level(setting_level: str) -> str:
+    """Pick the effective log level. Priority: --debug flag > env > setting."""
+    if "--debug" in sys.argv or "-v" in sys.argv:
+        return "DEBUG"
+    env = os.environ.get("SMARTPAD_LOG_LEVEL", "").upper()
+    if env in _VALID_LEVELS:
+        return env
+    candidate = (setting_level or "INFO").upper()
+    return candidate if candidate in _VALID_LEVELS else "INFO"
+
+
+def _configure_logging(data_dir: Path, level: str = "INFO") -> Path:
+    """Set up loguru. Returns the path to the active log file.
+
+    Both stderr and the rotating file use the resolved level. The file format
+    includes module:line so DEBUG output is actionable.
+    """
     log_dir = data_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "smartpad.log"
 
     # Remove default handler
     logger.remove()
 
-    # Stderr — INFO and above
     logger.add(
         sys.stderr,
-        level="INFO",
+        level=level,
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
         colorize=True,
     )
 
-    # Rotating file — DEBUG and above, 10 MB, keep 7
     logger.add(
-        log_dir / "smartpad.log",
-        level="DEBUG",
+        log_file,
+        level=level,
         rotation="10 MB",
         retention=7,
         compression="gz",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{line} | {message}",
         enqueue=True,  # thread-safe writes
     )
+    return log_file
 
 
 def run() -> None:
@@ -56,8 +76,10 @@ def run() -> None:
     settings = load_settings()
 
     # ── 2. Logging ────────────────────────────────────────────────────────────
-    _configure_logging(DATA_DIR)
+    effective_level = _resolve_log_level(settings.log_level)
+    log_file = _configure_logging(DATA_DIR, level=effective_level)
     logger.info("SmartPad starting — data dir: {}", DATA_DIR)
+    logger.info("Log level: {}  ·  log file: {}", effective_level, log_file)
 
     # ── 3. Run DB migrations ──────────────────────────────────────────────────
     db_path = DATA_DIR / "smartpad.db"
