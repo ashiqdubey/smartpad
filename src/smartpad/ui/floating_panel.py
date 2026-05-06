@@ -282,8 +282,20 @@ class FloatingPanel(QWidget):
         return header
 
     def _open_settings(self) -> None:
-        """Open the settings dialog as an independent top-level window."""
+        """Open the settings dialog as an independent top-level window.
+
+        We keep the floating panel visible underneath so the app's window
+        count never reaches zero — that's what was triggering the silent
+        app-quit when the user clicked the back button on Settings.
+        """
         from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
+
+        # Defensive: some Qt builds drop the setting; re-assert it.
+        app = QApplication.instance()
+        if app is not None:
+            app.setQuitOnLastWindowClosed(False)
+        if not self.isVisible():
+            self.show_panel()
 
         existing = getattr(self, "_settings_dlg", None)
         if existing is not None and existing.isVisible():
@@ -292,24 +304,46 @@ class FloatingPanel(QWidget):
             return
         dlg = SettingsDialog(parent=None)
         self._settings_dlg = dlg
+        dlg.finished.connect(self._after_dialog_closed)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
 
-    def _open_browse(self) -> None:
-        """Open the browse window as an independent top-level window."""
+    def _open_browse(self, tab: int | None = None, search: str | None = None) -> None:
+        """Open the browse window. Optionally select tab and/or pre-fill search."""
         from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setQuitOnLastWindowClosed(False)
+        if not self.isVisible():
+            self.show_panel()
 
         existing = getattr(self, "_browse_dlg", None)
         if existing is not None and existing.isVisible():
+            if tab is not None:
+                existing.set_tab(tab)
+            if search is not None:
+                existing.set_search(search)
             existing.raise_()
             existing.activateWindow()
             return
         dlg = BrowseWindow(parent=None)
         self._browse_dlg = dlg
+        if tab is not None:
+            dlg.set_tab(tab)
+        if search is not None:
+            dlg.set_search(search)
+        dlg.finished.connect(self._after_dialog_closed)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _after_dialog_closed(self, *_args: Any) -> None:
+        """If the panel was hidden by an outside click during dialog use,
+        bring it back so the app stays anchored to a visible window."""
+        if not self.isVisible():
+            self.show_panel()
 
     def _build_chat_area(self) -> QScrollArea:
         self._scroll = QScrollArea()
@@ -610,12 +644,20 @@ class FloatingPanel(QWidget):
                 self._on_send()
                 return True
 
-        # Click outside the panel → hide
+        # Click outside the panel → hide. But never auto-hide when the user
+        # is interacting with one of our own dialogs (Settings/Browse) —
+        # otherwise the panel disappears and Qt thinks no windows are visible,
+        # which can quit the app when the dialog finally closes.
         if event.type() == QEvent.Type.MouseButtonPress and self.isVisible():
             try:
                 gpos = event.globalPosition().toPoint()
-                if not self.geometry().contains(gpos):
-                    self.hide_panel()
+                if self.geometry().contains(gpos):
+                    return False
+                for attr in ("_settings_dlg", "_browse_dlg"):
+                    dlg = getattr(self, attr, None)
+                    if dlg is not None and dlg.isVisible() and dlg.geometry().contains(gpos):
+                        return False
+                self.hide_panel()
             except AttributeError:
                 pass  # event without globalPosition (e.g. tablet events)
 
@@ -738,17 +780,7 @@ class FloatingPanel(QWidget):
                 self._save_snippet_to_db(result.body)
             case ActionKind.APP_COMMAND:
                 app_action = result.metadata.get("app_action", "")
-                if app_action == "settings":
-                    self._open_settings()
-                elif app_action in ("browse", "notes", "snippets"):
-                    self._open_browse()
-                else:
-                    self._add_widget(
-                        ChatBubble(
-                            role="assistant",
-                            text=f"/{app_action} — use the buttons in the header.",
-                        )
-                    )
+                self._handle_app_command(app_action, result.body, result.slash_command or "")
             case ActionKind.QUERY_DB:
                 ai_bubble = ChatBubble(
                     role="assistant",
@@ -763,6 +795,83 @@ class FloatingPanel(QWidget):
             case _:
                 self._chat_history.append(ChatMessage(role="user", content=result.body))
                 self._start_chat(result.body)
+
+    def _handle_app_command(self, app_action: str, body: str, slash_cmd: str) -> None:
+        """Dispatch app/slash actions to actual handlers."""
+        # Browse aliases
+        TAB_NOTES, TAB_TASKS, TAB_REMINDERS, TAB_SNIPPETS = 0, 1, 2, 3
+        if app_action in ("settings", "ai_settings", "model"):
+            self._open_settings()
+            return
+        if app_action in ("browse", "notes", "list_notes"):
+            self._open_browse(tab=TAB_NOTES)
+            return
+        if app_action == "list_tasks":
+            self._open_browse(tab=TAB_TASKS)
+            return
+        if app_action == "today":
+            self._open_browse(tab=TAB_TASKS)
+            return
+        if app_action == "list_snippets":
+            self._open_browse(tab=TAB_SNIPPETS)
+            return
+        if app_action == "search":
+            self._open_browse(tab=TAB_NOTES, search=body)
+            return
+        if app_action == "clear_chat":
+            self._clear_chat()
+            return
+        if app_action == "help":
+            self._show_help()
+            return
+        if app_action in ("mark_done", "soft_delete"):
+            self._add_widget(ChatBubble(
+                role="assistant",
+                text=(f"`{slash_cmd}` works on a selected item. Open Notes & Tasks "
+                      f"(/notes) and use the actions there."),
+            ))
+            return
+        # Unknown — surface it instead of silently dropping
+        self._add_widget(ChatBubble(
+            role="assistant",
+            text=f"Command `{slash_cmd}` is not yet implemented.",
+        ))
+
+    def _clear_chat(self) -> None:
+        """Wipe all bubbles and chat history."""
+        # Trailing stretch is the last item; everything else is bubbles.
+        while self._chat_layout.count() > 1:
+            item = self._chat_layout.takeAt(0)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
+        self._chat_history.clear()
+        self._note_bubbles.clear()
+        self._pending_jobs.clear()
+        self._set_status("Cleared")
+
+    def _show_help(self) -> None:
+        help_text = (
+            "SmartPad commands\n"
+            "─────────────────\n"
+            "/note <text>         — save a note\n"
+            "/task <text>         — save a task\n"
+            "/remind <when> <txt> — set a reminder\n"
+            "/snippet <code>      — save a code snippet\n"
+            "/notes               — browse notes\n"
+            "/tasks               — browse tasks\n"
+            "/today               — items due today\n"
+            "/snippets            — browse snippets\n"
+            "/find <q>  /search <q> — search\n"
+            "/settings            — open settings\n"
+            "/clear               — clear this chat\n"
+            "/help                — this list\n\n"
+            "You can also just write naturally — "
+            "“note: …”, “remember this: …”, “make a note about …” all work."
+        )
+        bubble = ChatBubble(role="assistant", text=help_text)
+        bubble.set_status("saved")
+        self._add_widget(bubble)
 
     def _start_chat(self, text: str) -> None:
         """Stream LLM response via a dedicated QThread (true per-token streaming)."""

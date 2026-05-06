@@ -199,6 +199,15 @@ class BrowseWindow(QDialog):
         """Event-bus slot — reload lists when anything is saved app-wide."""
         self._load()
 
+    def set_tab(self, index: int) -> None:
+        """Programmatically switch to a tab (0=Notes, 1=Tasks, 2=Reminders, 3=Snippets)."""
+        if 0 <= index < self._tabs.count():
+            self._tabs.setCurrentIndex(index)
+
+    def set_search(self, query: str) -> None:
+        """Set the search filter text."""
+        self._search.setText(query or "")
+
     def keyPressEvent(self, event: object) -> None:  # noqa: N802
         # Esc closes the window — common back-button shortcut
         try:
