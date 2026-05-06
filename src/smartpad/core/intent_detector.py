@@ -85,19 +85,18 @@ _TASK_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bneed\s+to\b.{0,60}\bby\b", re.I),
 ]
 
-# NOTE patterns — natural language note commands. Always strip the prefix
-# in _strip_match so we save the user's content, not the verb.
+# LITERAL note patterns — the user is providing the body directly.
+# Phrasings like "make/write a note about X" are intentionally NOT here:
+# those mean "generate a note, then save it" and are handled by the
+# compound-intent path in floating_panel after the AI streams.
 _NOTE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"^note\s*[:\-]\s*", re.I),
-    re.compile(r"^write\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
-    re.compile(r"^add\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
-    re.compile(r"^make\s+(a|the)\s+note\s*[:\-]?\s*", re.I),
-    re.compile(r"^save\s+(this\s+|it\s+)?(as\s+)?(a\s+)?note\s*[:\-]?\s*", re.I),
-    re.compile(r"^save\s+(this|it)\s+to\s+notes?\s*[:\-]?\s*", re.I),
-    re.compile(r"^note\s+down\s*[:\-]?\s*", re.I),
-    re.compile(r"^jot\s+(down|this)\s*[:\-]?\s*", re.I),
-    re.compile(r"^remember\s+(this|that)\s*[:\-]?\s*", re.I),
-    re.compile(r"^store\s+(this|it)\s*[:\-]?\s*", re.I),
+    re.compile(r"^note\s*[:\-]\s+", re.I),                       # note: foo
+    re.compile(r"^remember\s+(this|that)\s*[:\-]\s+", re.I),     # remember this: foo
+    re.compile(r"^store\s+(this|it)\s*[:\-]\s+", re.I),          # store this: foo
+    re.compile(r"^jot\s+(down|this)\s*[:\-]\s+", re.I),          # jot down: foo
+    re.compile(r"^note\s+down\s*[:\-]\s+", re.I),                # note down: foo
+    re.compile(r"^save\s+(this\s+|it\s+)(as\s+)?(a\s+)?note\s*[:\-]?\s+", re.I),
+    re.compile(r"^save\s+(this|it)\s+to\s+notes?\s*[:\-]?\s+", re.I),
 ]
 
 _SNIPPET_PATTERNS: list[re.Pattern[str]] = [

@@ -84,8 +84,14 @@ CRITICAL — NEVER tell the user to type slash commands like /note, /task, /remi
 detects intent automatically. If the user says "save this as a note", "write a note about X",
 "remember this", etc., the app saves it for you AFTER your response. Just generate the content
 they asked for — do NOT respond with instructions to use commands. Do NOT say things like
-"Type /note to save this" or "Use the /task command". Just answer or generate the requested
-content directly."""
+"Type /note to save this" or "Use the /task command".
+
+When the user asks you to "make a note about X", "write a note on Y", or anything similar that
+implies saving:
+- Reply with ONLY the note content itself. No "Sure, here's your note:" preamble. No
+  "Would you like to add anything else?" trailer. Just the content.
+- Keep it tight — a few lines or a short paragraph, unless they ask for length.
+- The app will save your reply as a note automatically. Don't tell them how to save it."""
 from smartpad.providers.base import ChatMessage
 from smartpad.ui.bubbles.chat_bubble import ChatBubble
 from smartpad.ui.bubbles.error_bubble import ErrorBubble
@@ -1062,31 +1068,55 @@ class FloatingPanel(QWidget):
     def _detect_save_intent(prompt: str) -> str | None:
         """Heuristic: did the user ask us to also save the response?
 
-        Returns one of "note" | "task" | "reminder" | None.
-        Avoids false positives on pure questions ("what should I save?") by
-        requiring an imperative phrasing.
+        Returns one of "note" | "task" | "reminder" | None. Triggered for
+        BOTH explicit "save it" follow-ups and generative requests like
+        "make a note about X" / "write a note about X".
         """
+        import re as _re  # noqa: PLC0415
         p = prompt.lower()
-        # Strong phrases — clear save intent
-        note_phrases = [
-            "save it", "save this", "save as note", "save it as note",
-            "save it to notes", "save this to notes", "save to notes",
-            "store it", "store this", "make a note", "add a note",
-            "remember it", "save and store", "and save it", "and save this",
-        ]
-        task_phrases = [
-            "save as task", "save it as task", "make a task", "add a task",
-            "as a task", "to my tasks", "save to tasks",
-        ]
-        rem_phrases = [
-            "save as reminder", "remind me later", "as a reminder",
-            "save as a reminder", "to my reminders",
-        ]
-        if any(ph in p for ph in task_phrases):
+
+        # ── Note: explicit + generative ───────────────────────────────────
+        note_re = _re.compile(
+            r"\b("
+            r"save\s+(it|this)(\s+as)?(\s+a)?(\s+note)?"
+            r"|save\s+(it|this)\s+to\s+notes?"
+            r"|save\s+as\s+(a\s+)?note"
+            r"|store\s+(it|this)"
+            r"|remember\s+(it|this|that)"
+            r"|and\s+save\s+(it|this)"
+            r"|(make|write|create|draft|add)\s+(a|the|me\s+a)\s+note(\s+about|\s+on|\s+for|\s+saying|\s+covering)?"
+            r"|new\s+note"
+            r"|note\s+(about|on|for|covering)"
+            r")\b",
+            _re.IGNORECASE,
+        )
+        # ── Task ──────────────────────────────────────────────────────────
+        task_re = _re.compile(
+            r"\b("
+            r"save\s+(it|this)\s+as\s+(a\s+)?task"
+            r"|save\s+as\s+(a\s+)?task"
+            r"|(make|create|add)\s+(a|the)\s+task"
+            r"|to\s+my\s+tasks?"
+            r"|save\s+to\s+tasks?"
+            r")\b",
+            _re.IGNORECASE,
+        )
+        # ── Reminder ──────────────────────────────────────────────────────
+        rem_re = _re.compile(
+            r"\b("
+            r"save\s+as\s+(a\s+)?reminder"
+            r"|set\s+(a\s+)?reminder"
+            r"|remind\s+me\s+later"
+            r"|to\s+my\s+reminders?"
+            r")\b",
+            _re.IGNORECASE,
+        )
+        # Order matters: task and reminder before note (note phrase is broader)
+        if task_re.search(p):
             return "task"
-        if any(ph in p for ph in rem_phrases):
+        if rem_re.search(p):
             return "reminder"
-        if any(ph in p for ph in note_phrases):
+        if note_re.search(p):
             return "note"
         return None
 
