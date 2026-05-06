@@ -126,17 +126,36 @@ QWidget {
     font-size: 13.5px;
 }
 
-/* Saved item bubbles — left-accent-bar style */
+/* Saved-note bubble — warm amber sticky-note treatment */
 #BubbleNote {
-    background-color: rgba(124, 110, 245, 0.07);
-    color: rgba(200, 195, 255, 0.92);
-    border: 1px solid rgba(124, 110, 245, 0.14);
-    border-left: 2px solid rgba(124, 110, 245, 0.55);
+    background-color: rgba(252, 196, 88, 0.08);
+    border: 1px solid rgba(252, 196, 88, 0.20);
+    border-left: 3px solid rgba(252, 188, 64, 0.78);
     border-radius: 10px;
-    padding: 9px 13px 9px 12px;
-    margin: 3px 10px;
 }
-#BubbleNote QLabel { background-color: transparent; }
+#NoteGlyph {
+    color: rgba(252, 188, 64, 0.92);
+    font-size: 14px;
+    font-weight: 700;
+    background-color: transparent;
+    padding-right: 2px;
+}
+#NoteKicker {
+    color: rgba(252, 188, 64, 0.72);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    background-color: transparent;
+}
+#NotePin {
+    color: rgba(252, 188, 64, 0.85);
+    background-color: transparent;
+}
+#NoteContent {
+    color: rgba(255, 240, 215, 0.96);
+    font-size: 13.5px;
+    background-color: transparent;
+}
 
 #BubbleTask {
     background-color: rgba(96, 165, 250, 0.06);

@@ -245,7 +245,7 @@ class BrowseWindow(QDialog):
         for n in self._all_notes:
             if _match(n.content):
                 when = self._humanize_time(getattr(n, "created_at", None))
-                card = NoteCard(content=n.content, when=when, glyph="✎", accent=QColor("#7c6ef5"))
+                card = NoteCard(content=n.content, when=when, glyph="✎")
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, n.content)
                 item.setSizeHint(card.sizeHint())

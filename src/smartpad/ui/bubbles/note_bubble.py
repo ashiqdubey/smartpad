@@ -1,13 +1,12 @@
-"""NoteBubble — displays a saved note.
+"""NoteBubble — sticky-note style saved-note display.
 
 Visual:
-- Full-width, pale yellow background (BubbleNote QSS ID)
-- note prefix before content text
-- Content text in italic
-- Pinned indicator shown when pinned=True
-- Right-click context menu -> "Show original" displays original_content
+- Warm amber tint card (distinct from chat bubbles)
+- Top kicker row: ✎ NOTE · saved <time>  + pin indicator on right
+- Content below in a clean readable face (not italic — it makes wraps hard to read)
+- Right-click → "Show original" to recover pre-AI text
 
-Status dot: top-right corner (saving -> saved -> error).
+Status dot: top-right corner (saving → saved → error).
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -26,14 +26,7 @@ from smartpad.ui.bubbles.base import BubbleBase
 
 
 class NoteBubble(BubbleBase):
-    """A saved-note bubble.
-
-    Args:
-        content: The (possibly AI-processed) note text to display.
-        original_content: The user's original raw text, accessible via right-click.
-        pinned: If True, shows a pin indicator.
-        parent: Optional parent widget.
-    """
+    """A saved-note bubble shown in the chat stream."""
 
     def __init__(
         self,
@@ -43,11 +36,9 @@ class NoteBubble(BubbleBase):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-
         self._content = content
         self._original_content = original_content
         self._pinned = pinned
-
         self._build_ui()
         self._refresh()
 
@@ -58,35 +49,44 @@ class NoteBubble(BubbleBase):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
 
-        frame_layout = QHBoxLayout(self._bubble_frame)
-        frame_layout.setContentsMargins(12, 8, 12, 8)
-        frame_layout.setSpacing(6)
+        v = QVBoxLayout(self._bubble_frame)
+        v.setContentsMargins(14, 10, 14, 12)
+        v.setSpacing(6)
 
-        self._icon_label = QLabel("\U0001f4dd")
-        self._icon_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
-        frame_layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignTop)
+        # Kicker line: ✎ NOTE  ·  saved
+        kicker_row = QHBoxLayout()
+        kicker_row.setContentsMargins(0, 0, 0, 0)
+        kicker_row.setSpacing(6)
 
+        glyph = QLabel("✎")
+        glyph.setObjectName("NoteGlyph")
+        kicker_row.addWidget(glyph)
+
+        kicker = QLabel("NOTE")
+        kicker.setObjectName("NoteKicker")
+        kicker_row.addWidget(kicker)
+
+        kicker_row.addStretch()
+
+        self._pin_label = QLabel("📌")
+        self._pin_label.setObjectName("NotePin")
+        self._pin_label.setVisible(self._pinned)
+        kicker_row.addWidget(self._pin_label)
+
+        v.addLayout(kicker_row)
+
+        # Content
         self._content_label = QLabel()
+        self._content_label.setObjectName("NoteContent")
         self._content_label.setWordWrap(True)
+        self._content_label.setMinimumWidth(0)
         self._content_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self._content_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        font = self._content_label.font()
-        font.setItalic(True)
-        self._content_label.setFont(font)
-        frame_layout.addWidget(self._content_label)
-
-        self._pin_label = QLabel("\U0001f4cc")
-        self._pin_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
-        self._pin_label.setVisible(self._pinned)
-        frame_layout.addWidget(self._pin_label, 0, Qt.AlignmentFlag.AlignTop)
+        v.addWidget(self._content_label)
 
         self._content_layout.addWidget(self._bubble_frame)
 
@@ -98,29 +98,17 @@ class NoteBubble(BubbleBase):
         )
 
     def set_content(self, content: str) -> None:
-        """Update the displayed note content.
-
-        Args:
-            content: New note text.
-        """
         self._content = content
         self._refresh()
 
     def set_pinned(self, pinned: bool) -> None:
-        """Show or hide the pin indicator.
-
-        Args:
-            pinned: Whether the note is pinned.
-        """
         self._pinned = pinned
         self._pin_label.setVisible(pinned)
 
     def _show_context_menu(self, pos: object) -> None:
         menu = QMenu(self._bubble_frame)
         show_orig = menu.addAction("Show original")
-        action = menu.exec(
-            self._bubble_frame.mapToGlobal(pos)  # type: ignore[arg-type]
-        )
+        action = menu.exec(self._bubble_frame.mapToGlobal(pos))  # type: ignore[arg-type]
         if action is show_orig:
             self._show_original_dialog()
 

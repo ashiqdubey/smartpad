@@ -178,10 +178,17 @@ def _get_settings() -> SmartPadSettings:
 class FloatingPanel(QWidget):
     """Frameless floating panel — the primary SmartPad UI surface."""
 
+    # Cross-thread signal: a background AI-level pipeline has produced
+    # processed note content. Args: (id(bubble), processed_text).
+    from PyQt6.QtCore import pyqtSignal as _sig
+    _note_processed = _sig(int, str)
+
     def __init__(self, pool: WorkerPool, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pool = pool
         self._settings = _get_settings()
+        self._note_bubbles: dict[int, Any] = {}
+        self._note_processed.connect(self._apply_processed_note)
         self._drag_pos: QPoint | None = None
         # job_id → ChatBubble (AI placeholder while streaming)
         self._pending_jobs: dict[str, ChatBubble] = {}
@@ -693,8 +700,12 @@ class FloatingPanel(QWidget):
                 )
                 note.set_status("saved")
                 self._add_widget(note)
-                self._set_status("Note saved")
-                self._save_note_to_db(result.body)
+                self._note_bubbles[id(note)] = note
+                level = int(self._settings.ai_level)
+                self._set_status(
+                    "Note saved" if level == 0 else f"Saving + AI L{level}…"
+                )
+                self._save_note_to_db(result.body, bubble=note)
             case ActionKind.SAVE_TASK:
                 task = TaskBubble(
                     task_id=str(uuid.uuid4()),
@@ -885,29 +896,47 @@ class FloatingPanel(QWidget):
 
     # ── DB save helpers (fire-and-forget background threads) ──────────────────
 
-    def _save_note_to_db(self, content: str) -> None:
+    def _save_note_to_db(self, content: str, bubble: Any = None) -> None:
         import asyncio  # noqa: PLC0415
         import threading  # noqa: PLC0415
+
+        # Capture settings + provider on the Qt thread so the worker has a
+        # snapshot it can use without re-touching shared state.
+        ai_level = int(self._settings.ai_level)
+        provider = self._get_provider()
+        model = self._resolve_model()
+        # Bubble updates must hop back to the Qt thread — use a signal proxy.
+        signal = self._note_processed if bubble is not None else None
 
         async def _do() -> None:
             try:
                 import uuid as _uuid  # noqa: PLC0415
                 from datetime import UTC, datetime  # noqa: PLC0415
 
+                from smartpad.core.ai_levels import process_capture  # noqa: PLC0415
                 from smartpad.db.engine import get_async_session  # noqa: PLC0415
                 from smartpad.db.models import Note  # noqa: PLC0415
                 from smartpad.db.repositories.notes import NotesRepo  # noqa: PLC0415
+
+                result = await process_capture(content, ai_level, provider, model)
 
                 async with get_async_session() as s:
                     await NotesRepo(s).save(
                         Note(
                             id=str(_uuid.uuid4()),
-                            content=content,
-                            original_content=content,
+                            content=result.content,
+                            original_content=result.original_content,
                             created_at=datetime.now(UTC),
                             sync_version=0,
                         )
                     )
+                logger.info(
+                    "Note saved (ai_level={}): {!r}",
+                    result.ai_level_applied,
+                    result.content[:60],
+                )
+                if signal is not None and result.content != content:
+                    signal.emit(id(bubble), result.content)
             except Exception as exc:
                 logger.error("DB note save failed: {}", exc)
 
@@ -917,25 +946,36 @@ class FloatingPanel(QWidget):
         import asyncio  # noqa: PLC0415
         import threading  # noqa: PLC0415
 
+        ai_level = int(self._settings.ai_level)
+        provider = self._get_provider()
+        model = self._resolve_model()
+
         async def _do() -> None:
             try:
                 import uuid as _uuid  # noqa: PLC0415
                 from datetime import UTC, datetime  # noqa: PLC0415
 
+                from smartpad.core.ai_levels import process_capture  # noqa: PLC0415
                 from smartpad.db.engine import get_async_session  # noqa: PLC0415
                 from smartpad.db.models import Task  # noqa: PLC0415
                 from smartpad.db.repositories.tasks import TasksRepo  # noqa: PLC0415
+
+                result = await process_capture(content, ai_level, provider, model)
 
                 async with get_async_session() as s:
                     await TasksRepo(s).save(
                         Task(
                             id=str(_uuid.uuid4()),
-                            content=content,
+                            content=result.content,
                             status="todo",
                             created_at=datetime.now(UTC),
                             sync_version=0,
                         )
                     )
+                logger.info(
+                    "Task saved (ai_level={}): {!r}",
+                    result.ai_level_applied, result.content[:60],
+                )
             except Exception as exc:
                 logger.error("DB task save failed: {}", exc)
 
@@ -945,21 +985,28 @@ class FloatingPanel(QWidget):
         import asyncio  # noqa: PLC0415
         import threading  # noqa: PLC0415
 
+        ai_level = int(self._settings.ai_level)
+        provider = self._get_provider()
+        model = self._resolve_model()
+
         async def _do() -> None:
             try:
                 import uuid as _uuid  # noqa: PLC0415
                 from datetime import UTC, datetime, timedelta  # noqa: PLC0415
 
+                from smartpad.core.ai_levels import process_capture  # noqa: PLC0415
                 from smartpad.db.engine import get_async_session  # noqa: PLC0415
                 from smartpad.db.models import Reminder  # noqa: PLC0415
                 from smartpad.db.repositories.reminders import RemindersRepo  # noqa: PLC0415
 
-                # Try to parse a time from the content; fall back to 1 hour from now
+                result = await process_capture(content, ai_level, provider, model)
+
+                # Try to parse a time from the (processed) content
                 trigger_at: datetime | None = None
                 try:
                     import dateparser  # noqa: PLC0415
 
-                    parsed = dateparser.parse(content, settings={"PREFER_DATES_FROM": "future"})
+                    parsed = dateparser.parse(result.content, settings={"PREFER_DATES_FROM": "future"})
                     if parsed is not None:
                         trigger_at = parsed.astimezone(UTC)
                 except Exception:
@@ -971,13 +1018,17 @@ class FloatingPanel(QWidget):
                     await RemindersRepo(s).save(
                         Reminder(
                             id=str(_uuid.uuid4()),
-                            content=content,
+                            content=result.content,
                             trigger_at=trigger_at,
                             notified=False,
                             created_at=datetime.now(UTC),
                             sync_version=0,
                         )
                     )
+                logger.info(
+                    "Reminder saved (ai_level={}): {!r}",
+                    result.ai_level_applied, result.content[:60],
+                )
             except Exception as exc:
                 logger.error("DB reminder save failed: {}", exc)
 
@@ -987,24 +1038,35 @@ class FloatingPanel(QWidget):
         import asyncio  # noqa: PLC0415
         import threading  # noqa: PLC0415
 
+        ai_level = int(self._settings.ai_level)
+        provider = self._get_provider()
+        model = self._resolve_model()
+
         async def _do() -> None:
             try:
                 import uuid as _uuid  # noqa: PLC0415
                 from datetime import UTC, datetime  # noqa: PLC0415
 
+                from smartpad.core.ai_levels import process_capture  # noqa: PLC0415
                 from smartpad.db.engine import get_async_session  # noqa: PLC0415
                 from smartpad.db.models import Snippet  # noqa: PLC0415
                 from smartpad.db.repositories.snippets import SnippetsRepo  # noqa: PLC0415
+
+                result = await process_capture(content, ai_level, provider, model)
 
                 async with get_async_session() as s:
                     await SnippetsRepo(s).save(
                         Snippet(
                             id=str(_uuid.uuid4()),
-                            content=content,
+                            content=result.content,
                             created_at=datetime.now(UTC),
                             sync_version=0,
                         )
                     )
+                logger.info(
+                    "Snippet saved (ai_level={}): {!r}",
+                    result.ai_level_applied, result.content[:60],
+                )
             except Exception as exc:
                 logger.error("DB snippet save failed: {}", exc)
 
@@ -1127,7 +1189,8 @@ class FloatingPanel(QWidget):
             bubble = NoteBubble(content=content, original_content=content)
             bubble.set_status("saved")
             self._add_widget(bubble)
-            self._save_note_to_db(content)
+            self._note_bubbles[id(bubble)] = bubble
+            self._save_note_to_db(content, bubble=bubble)
             self._set_status("Saved as note ✓")
         elif kind == "task":
             bubble = TaskBubble(task_id=str(_uuid.uuid4()), content=content)
@@ -1141,6 +1204,20 @@ class FloatingPanel(QWidget):
             self._add_widget(bubble)
             self._save_reminder_to_db(content)
             self._set_status("Saved as reminder ✓")
+
+    @pyqtSlot(int, str)
+    def _apply_processed_note(self, bubble_id: int, processed: str) -> None:
+        """Slot — update a saved-note bubble with the AI-processed content."""
+        bubble = self._note_bubbles.pop(bubble_id, None)
+        if bubble is None:
+            return
+        try:
+            bubble.set_content(processed)
+            bubble.set_status("saved")
+            self._set_status("Note saved ✓")
+        except RuntimeError:
+            # bubble was destroyed before the AI returned — silent drop
+            pass
 
     @pyqtSlot(str, str)
     def _on_stream_error(self, job_id: str, message: str) -> None:

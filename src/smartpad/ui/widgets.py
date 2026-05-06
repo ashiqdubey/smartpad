@@ -351,8 +351,12 @@ class HourSlider(QWidget):
         p.end()
 
 
+NOTE_AMBER = QColor(252, 188, 64)        # warm amber accent
+NOTE_AMBER_GLOW = QColor(252, 188, 64, 38)
+
+
 class NoteCard(QWidget):
-    """Sticky-style note card — accent left bar, glyph, meta + content."""
+    """Sticky-note style card — warm amber tint, accent left bar, glyph + meta + content."""
 
     def __init__(
         self,
@@ -366,76 +370,69 @@ class NoteCard(QWidget):
         self._content = content
         self._when = when
         self._glyph = glyph
-        self._accent = QColor(accent) if accent else QColor(ACCENT)
-        self.setMinimumHeight(72)
+        self._accent = QColor(accent) if accent else QColor(NOTE_AMBER)
+        self.setMinimumHeight(78)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
-        h = QHBoxLayout(self)
-        h.setContentsMargins(14, 10, 14, 10)
-        h.setSpacing(12)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 12, 16, 14)
+        outer.setSpacing(6)
 
-        # Accent glyph badge
-        badge = QWidget()
-        badge.setFixedSize(QSize(28, 28))
+        # Top kicker line: glyph + NOTE + when (right)
+        kicker_row = QHBoxLayout()
+        kicker_row.setContentsMargins(0, 0, 0, 0)
+        kicker_row.setSpacing(8)
 
-        def _paint_badge(_evt, b=badge, a=self._accent, g=glyph):  # type: ignore[no-untyped-def]
-            p = QPainter(b)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            soft = QColor(a)
-            soft.setAlpha(40)
-            path = QPainterPath()
-            path.addRoundedRect(0.0, 0.0, 28.0, 28.0, 7.0, 7.0)
-            p.fillPath(path, QBrush(soft))
-            font = b.font()
-            font.setPixelSize(14)
-            font.setWeight(QFont.Weight.DemiBold)
-            p.setFont(font)
-            p.setPen(QPen(a))
-            p.drawText(b.rect(), int(Qt.AlignmentFlag.AlignCenter), g)
-            p.end()
+        glyph_label = QLabel(self._glyph)
+        glyph_label.setObjectName("NoteGlyph")
+        kicker_row.addWidget(glyph_label)
 
-        badge.paintEvent = _paint_badge  # type: ignore[method-assign]
-        h.addWidget(badge)
+        meta = QLabel(f"NOTE  ·  saved {when}" if when else "NOTE")
+        meta.setObjectName("NoteKicker")
+        kicker_row.addWidget(meta)
+        kicker_row.addStretch()
 
-        # Body
-        body = QVBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(2)
+        outer.addLayout(kicker_row)
 
-        meta = QLabel(f"NOTE · {when}" if when else "NOTE")
-        meta.setObjectName("CardKicker")
-        body.addWidget(meta)
-
-        truncated = content if len(content) <= 200 else content[:197] + "…"
+        truncated = content if len(content) <= 240 else content[:237] + "…"
         text = QLabel(truncated)
         text.setObjectName("NoteCardText")
         text.setWordWrap(True)
         text.setMinimumWidth(0)
-        body.addWidget(text)
-
-        h.addLayout(body, stretch=1)
+        text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        outer.addWidget(text)
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = float(self.width()), float(self.height())
-        # Card body
+
+        # Soft amber card body
         path = QPainterPath()
         path.addRoundedRect(0.0, 0.0, w, h, 12.0, 12.0)
         bg = QColor(self._accent)
-        bg.setAlpha(20)
+        bg.setAlpha(22)
         p.fillPath(path, QBrush(bg))
-        # Accent left bar (clipped to rounded edge)
+
+        # Subtle inner shadow up top — sells the "paper" depth
+        top = QPainterPath()
+        top.addRoundedRect(0.0, 0.0, w, 12.0, 12.0, 12.0)
+        shade = QColor(0, 0, 0, 22)
+        p.fillPath(top, QBrush(shade))
+
+        # Accent left bar — clipped to rounded corner
         bar_path = QPainterPath()
         bar_path.addRoundedRect(0.0, 0.0, 3.0, h, 1.5, 1.5)
         bar_color = QColor(self._accent)
-        bar_color.setAlpha(220)
+        bar_color.setAlpha(225)
         p.fillPath(bar_path, QBrush(bar_color))
-        # Hairline border
-        p.setPen(QPen(QColor(self._accent.red(), self._accent.green(), self._accent.blue(), 50), 1.0))
+
+        # Hairline amber border
+        p.setPen(QPen(QColor(self._accent.red(), self._accent.green(), self._accent.blue(), 60), 1.0))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), 11.5, 11.5)
+
         p.end()
 
 
