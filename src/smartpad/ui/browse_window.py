@@ -189,15 +189,18 @@ class BrowseWindow(QDialog):
 
     def _load(self) -> None:
         self._status.setText("Loading…")
-        # Stop any in-flight loader before starting a new one
-        if self._loader is not None and self._loader.isRunning():
+        # Disconnect any previous loader so a late finish doesn't poke us.
+        # Don't use deleteLater here — `self._loader` keeps the Python
+        # wrapper alive while the C++ object is destroyed, which then
+        # blows up on the next isRunning() check.
+        old = self._loader
+        if old is not None:
             try:
-                self._loader.finished.disconnect()
+                old.finished.disconnect()
             except (TypeError, RuntimeError):
                 pass
         loader = _DBLoader(self)  # parent=self anchors lifetime to dialog
         loader.finished.connect(self._on_loaded)
-        loader.finished.connect(loader.deleteLater)
         self._loader = loader
         loader.start()
 
@@ -217,9 +220,14 @@ class BrowseWindow(QDialog):
                 loader.finished.disconnect()
             except (TypeError, RuntimeError):
                 pass
-            if loader.isRunning():
-                loader.quit()
-                loader.wait(2000)
+            try:
+                if loader.isRunning():
+                    loader.quit()
+                    loader.wait(2000)
+            except RuntimeError:
+                # C++ object already gone — nothing to do
+                pass
+        self._loader = None
         super().closeEvent(event)  # type: ignore[arg-type]
 
     def _filter(self, text: str) -> None:

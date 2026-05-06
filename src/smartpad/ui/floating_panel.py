@@ -125,17 +125,29 @@ class _ChatThread(QThread):
             loop.close()
 
     async def _stream(self) -> None:
+        iterator = None
         try:
-            async for chunk in await self._provider.chat(
+            iterator = await self._provider.chat(
                 messages=self._messages,
                 model=self._model,
                 temperature=self._temperature,
                 stream=True,
-            ):
+            )
+            async for chunk in iterator:
                 self.chunk_ready.emit(self._job_id, chunk.delta)
             self.stream_done.emit(self._job_id)
         except Exception as exc:
             self.stream_error.emit(self._job_id, str(exc))
+        finally:
+            # Explicitly close the async generator so httpx doesn't leak the
+            # underlying Response and emit "coroutine was never awaited" warns.
+            if iterator is not None:
+                aclose = getattr(iterator, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception:
+                        pass
 
 
 # Module-level settings singleton to avoid re-instantiation during GC
@@ -186,11 +198,12 @@ class FloatingPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumSize(440, 540)
 
-        # Big, soft drop shadow — sets the panel apart from the wallpaper
+        # Drop shadow — kept moderate so Windows' UpdateLayeredWindowIndirect
+        # doesn't choke on dirty rects extending too far past the panel rect.
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(60)
-        shadow.setOffset(0, 18)
-        shadow.setColor(QColor(8, 6, 18, 165))
+        shadow.setBlurRadius(36)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(8, 6, 18, 150))
         self.setGraphicsEffect(shadow)
 
     def _build_ui(self) -> None:
@@ -505,27 +518,32 @@ class FloatingPanel(QWidget):
 
     def paintEvent(self, event: Any) -> None:
         """Paint the panel: glass background + soft accent glow at the bottom."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = float(self.width()), float(self.height())
+        try:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            w, h = float(self.width()), float(self.height())
 
-        path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, w, h, 18.0, 18.0)
+            path = QPainterPath()
+            path.addRoundedRect(0.0, 0.0, w, h, 18.0, 18.0)
 
-        # Glass base — slightly translucent so acrylic shows through
-        painter.fillPath(path, QColor(22, 20, 34, 232))
+            # Glass base — slightly translucent so acrylic shows through
+            painter.fillPath(path, QColor(22, 20, 34, 232))
 
-        # Accent glow rising from the bottom centre
-        glow = QRadialGradient(w / 2.0, h, w * 0.85)
-        glow.setColorAt(0.0, QColor(124, 110, 245, 64))
-        glow.setColorAt(1.0, QColor(124, 110, 245, 0))
-        painter.fillPath(path, QBrush(glow))
+            # Accent glow rising from the bottom centre
+            glow = QRadialGradient(w / 2.0, h, w * 0.85)
+            glow.setColorAt(0.0, QColor(124, 110, 245, 64))
+            glow.setColorAt(1.0, QColor(124, 110, 245, 0))
+            painter.fillPath(path, QBrush(glow))
 
-        # Top inner highlight — subtle 1px line that sells the glass illusion
-        painter.setPen(QColor(255, 255, 255, 18))
-        painter.drawLine(8, 1, int(w) - 8, 1)
+            # Top inner highlight — subtle 1px line that sells the glass illusion
+            painter.setPen(QColor(255, 255, 255, 18))
+            painter.drawLine(8, 1, int(w) - 8, 1)
 
-        painter.end()
+            painter.end()
+        except Exception as exc:
+            # Layered-window paint can fail transiently on Windows.
+            # Logging instead of crashing keeps the panel alive.
+            logger.debug("FloatingPanel paint failed (non-fatal): {}", exc)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
