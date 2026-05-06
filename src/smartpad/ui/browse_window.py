@@ -5,7 +5,7 @@ import asyncio
 from typing import Any
 
 from loguru import logger
-from PyQt6.QtCore import Qt, QPoint, QSize, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, QPoint, QSize, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QRadialGradient  # noqa: F401
 from PyQt6.QtWidgets import (
     QDialog,
@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from smartpad.core.event_bus import event_bus
 from smartpad.ui.widgets import LogoMark, NoteCard
 
 
@@ -76,6 +77,16 @@ class BrowseWindow(QDialog):
         self._loader: _DBLoader | None = None
         self._setup_ui()
         self._load()
+
+        # Live refresh: when the panel saves something, reload our lists.
+        event_bus().item_saved.connect(self._on_item_saved)
+
+        # Poll fallback — covers the case where the bus signal was missed
+        # (e.g. saved from the API server in another process).
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(4000)
+        self._poll_timer.timeout.connect(self._load)
+        self._poll_timer.start()
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         # Solid rounded fill — gradients here caused tab-switch crashes on Windows
@@ -152,8 +163,17 @@ class BrowseWindow(QDialog):
         bar.setFixedHeight(56)
 
         row = QHBoxLayout(bar)
-        row.setContentsMargins(18, 0, 14, 0)
-        row.setSpacing(10)
+        row.setContentsMargins(10, 0, 14, 0)
+        row.setSpacing(8)
+
+        # Back button — dismisses the dialog and returns focus to whatever was active
+        back_btn = QPushButton("←")
+        back_btn.setObjectName("DialogBackButton")
+        back_btn.setFixedSize(QSize(32, 32))
+        back_btn.setToolTip("Back  (Esc)")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(self.close)
+        row.addWidget(back_btn)
 
         row.addWidget(LogoMark(20))
 
@@ -173,6 +193,21 @@ class BrowseWindow(QDialog):
         bar.mouseMoveEvent = self._bar_move     # type: ignore[method-assign]
         bar.mouseReleaseEvent = self._bar_release  # type: ignore[method-assign]
         return bar
+
+    @pyqtSlot(str)
+    def _on_item_saved(self, _kind: str) -> None:
+        """Event-bus slot — reload lists when anything is saved app-wide."""
+        self._load()
+
+    def keyPressEvent(self, event: object) -> None:  # noqa: N802
+        # Esc closes the window — common back-button shortcut
+        try:
+            if event.key() == Qt.Key.Key_Escape:  # type: ignore[union-attr]
+                self.close()
+                return
+        except AttributeError:
+            pass
+        super().keyPressEvent(event)  # type: ignore[arg-type]
 
     def _bar_press(self, event) -> None:  # type: ignore[no-untyped-def]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -213,6 +248,14 @@ class BrowseWindow(QDialog):
         self._populate(self._search.text())
 
     def closeEvent(self, event: object) -> None:  # noqa: N802
+        # Stop polling first so no Qt timer fires after teardown
+        if hasattr(self, "_poll_timer"):
+            self._poll_timer.stop()
+        # Detach event-bus listener
+        try:
+            event_bus().item_saved.disconnect(self._on_item_saved)
+        except (TypeError, RuntimeError):
+            pass
         # Disconnect signal so a late-arriving DB result doesn't poke a dead UI
         loader = self._loader
         if loader is not None:

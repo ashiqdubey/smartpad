@@ -342,6 +342,25 @@ QLabel {
 }
 #DialogCloseButton:hover { background-color: rgba(255, 59, 48, 0.14); color: rgba(255, 80, 70, 1.0); }
 
+#DialogBackButton {
+    background-color: rgba(246, 246, 250, 0.05);
+    color: rgba(246, 246, 250, 0.78);
+    border: 1px solid rgba(240, 240, 248, 0.12);
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0;
+}
+#DialogBackButton:hover {
+    background-color: rgba(124, 110, 245, 0.18);
+    border-color: rgba(124, 110, 245, 0.45);
+    color: rgba(255, 255, 255, 0.95);
+}
+
 /* ── Settings cards (glass tiles inside tabs) ──────────────────────────────── */
 #SettingsCard {
     background-color: rgba(246, 246, 250, 0.025);

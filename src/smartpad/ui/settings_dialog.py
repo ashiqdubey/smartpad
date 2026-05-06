@@ -85,8 +85,16 @@ class SettingsDialog(QDialog):
         bar.setObjectName("DialogTitleBar")
         bar.setFixedHeight(56)
         row = QHBoxLayout(bar)
-        row.setContentsMargins(18, 0, 14, 0)
-        row.setSpacing(10)
+        row.setContentsMargins(10, 0, 14, 0)
+        row.setSpacing(8)
+
+        back_btn = QPushButton("←")
+        back_btn.setObjectName("DialogBackButton")
+        back_btn.setFixedSize(QSize(32, 32))
+        back_btn.setToolTip("Back  (Esc)")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(self.reject)
+        row.addWidget(back_btn)
 
         row.addWidget(LogoMark(20))
 
@@ -125,6 +133,15 @@ class SettingsDialog(QDialog):
 
     def _bar_release(self, event) -> None:  # type: ignore[no-untyped-def]
         self._drag_pos = None
+
+    def keyPressEvent(self, event: object) -> None:  # noqa: N802
+        try:
+            if event.key() == Qt.Key.Key_Escape:  # type: ignore[union-attr]
+                self.reject()
+                return
+        except AttributeError:
+            pass
+        super().keyPressEvent(event)  # type: ignore[arg-type]
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
 

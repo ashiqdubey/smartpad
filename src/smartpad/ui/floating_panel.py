@@ -654,14 +654,23 @@ class FloatingPanel(QWidget):
             self._slash_menu.hide()
 
     def _position_slash_menu(self) -> None:
-        # Place the menu above the input field, inside the panel
-        input_pos = self._input.mapTo(self, QPoint(0, 0))
+        """Anchor the menu just above the composer frame, clamped to panel."""
+        ref = getattr(self, "_composer_frame", self._input)
+        ref_pos = ref.mapTo(self, QPoint(0, 0))
         menu_h = min(self._slash_menu.sizeHint().height(), 260)
-        menu_w = self._input.width()
-        x = input_pos.x()
-        y = input_pos.y() - menu_h - 6
+        menu_w = max(280, ref.width())
+        x = ref_pos.x()
+        y = ref_pos.y() - menu_h - 6
+
+        # Clamp inside the panel rect with an 8px margin
+        if x + menu_w > self.width() - 8:
+            x = self.width() - menu_w - 8
+        x = max(8, x)
+        y = max(8, y)
+
         self._slash_menu.setGeometry(x, y, menu_w, menu_h)
         self._slash_menu.raise_()
+        self._slash_menu.show()
 
     def _on_slash_selected(self, command: str) -> None:
         # Put the selected command in the input with a trailing space so user types content
@@ -937,6 +946,9 @@ class FloatingPanel(QWidget):
                 )
                 if signal is not None and result.content != content:
                     signal.emit(id(bubble), result.content)
+                from smartpad.core.event_bus import event_bus  # noqa: PLC0415
+                event_bus().note_saved.emit()
+                event_bus().item_saved.emit("note")
             except Exception as exc:
                 logger.error("DB note save failed: {}", exc)
 
@@ -976,6 +988,9 @@ class FloatingPanel(QWidget):
                     "Task saved (ai_level={}): {!r}",
                     result.ai_level_applied, result.content[:60],
                 )
+                from smartpad.core.event_bus import event_bus  # noqa: PLC0415
+                event_bus().task_saved.emit()
+                event_bus().item_saved.emit("task")
             except Exception as exc:
                 logger.error("DB task save failed: {}", exc)
 
@@ -1029,6 +1044,9 @@ class FloatingPanel(QWidget):
                     "Reminder saved (ai_level={}): {!r}",
                     result.ai_level_applied, result.content[:60],
                 )
+                from smartpad.core.event_bus import event_bus  # noqa: PLC0415
+                event_bus().reminder_saved.emit()
+                event_bus().item_saved.emit("reminder")
             except Exception as exc:
                 logger.error("DB reminder save failed: {}", exc)
 
@@ -1067,6 +1085,9 @@ class FloatingPanel(QWidget):
                     "Snippet saved (ai_level={}): {!r}",
                     result.ai_level_applied, result.content[:60],
                 )
+                from smartpad.core.event_bus import event_bus  # noqa: PLC0415
+                event_bus().snippet_saved.emit()
+                event_bus().item_saved.emit("snippet")
             except Exception as exc:
                 logger.error("DB snippet save failed: {}", exc)
 
