@@ -110,7 +110,9 @@ QWidget {
    User:  accent purple bg, white text, bottom-right nub
    AI:    barely-there glass, subtle border, bottom-left nub
    ────────────────────────────────────────────────────────────────────────── */
-/* iMessage-style chat bubbles — vertical gradient, soft tail, top highlight */
+/* iMessage-style chat bubbles — vertical gradient, soft tail, top highlight.
+   Uses dark-mode colours regardless of system theme because the panel's
+   paintEvent always renders a dark background. */
 #BubbleUser {
     background-color: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
@@ -122,29 +124,27 @@ QWidget {
     border-radius: 18px 18px 5px 18px;
     border-top: 1px solid rgba(255, 255, 255, 0.22);
     border-bottom: 1px solid rgba(0, 0, 0, 0.20);
-    padding: 8px 14px;
+    padding: 7px 13px;
 }
 #BubbleUser QLabel {
     background-color: transparent;
     color: #ffffff;
-    font-size: 14px;
+    font-size: 13.5px;
     letter-spacing: -0.005em;
 }
 
 #BubbleAI {
-    /* Solid dark-grey iMessage-style — clearly visible against the
-       near-black panel, so light text reads cleanly. */
     background-color: rgba(58, 58, 65, 0.92);
     color: #ffffff;
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-top: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 5px 18px 18px 18px;
-    padding: 8px 14px;
+    padding: 7px 13px;
 }
 #BubbleAI QLabel {
     background-color: transparent;
     color: #ffffff;
-    font-size: 14px;
+    font-size: 13.5px;
     letter-spacing: -0.005em;
 }
 
@@ -695,10 +695,12 @@ QLabel { background-color: transparent; color: #1a1830; }
 #ChatScrollArea QScrollBar::add-line:vertical, #ChatScrollArea QScrollBar::sub-line:vertical { height: 0; }
 #ChatContainer { background-color: transparent; }
 
-#BubbleUser { background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #9587ff,stop:0.55 #7c6ef5,stop:1 #6557d8); color: #fff; border-radius: 19px 19px 5px 19px; border-top: 1px solid rgba(255,255,255,0.20); border-bottom: 1px solid rgba(0,0,0,0.18); padding: 12px 16px; }
-#BubbleUser QLabel { background-color: transparent; color: #fff; font-size: 14px; line-height: 1.4; letter-spacing: -0.005em; }
-#BubbleAI { background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 rgba(255,255,255,0.95),stop:1 rgba(245,245,250,0.85)); color: #1a1830; border: 1px solid rgba(26,24,48,0.10); border-radius: 5px 19px 19px 19px; padding: 12px 16px; }
-#BubbleAI QLabel { background-color: transparent; color: #1a1830; font-size: 14px; line-height: 1.4; letter-spacing: -0.005em; }
+/* Bubbles always render against the dark FloatingPanel paintEvent
+   regardless of system theme — keep them dark-styled for consistency. */
+#BubbleUser { background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #9587ff,stop:0.55 #7c6ef5,stop:1 #6557d8); color: #fff; border-radius: 18px 18px 5px 18px; border-top: 1px solid rgba(255,255,255,0.22); border-bottom: 1px solid rgba(0,0,0,0.20); padding: 7px 13px; }
+#BubbleUser QLabel { background-color: transparent; color: #fff; font-size: 13.5px; letter-spacing: -0.005em; }
+#BubbleAI { background-color: rgba(58, 58, 65, 0.92); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-top: 1px solid rgba(255,255,255,0.16); border-radius: 5px 18px 18px 18px; padding: 7px 13px; }
+#BubbleAI QLabel { background-color: transparent; color: #fff; font-size: 13.5px; letter-spacing: -0.005em; }
 #BubbleNote { background-color: rgba(124,110,245,0.06); color: #3d2e99; border: 1px solid rgba(124,110,245,0.12); border-left: 2px solid rgba(124,110,245,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }
 #BubbleNote QLabel { background-color: transparent; }
 #BubbleTask { background-color: rgba(59,130,246,0.06); color: #1e3a8a; border: 1px solid rgba(59,130,246,0.12); border-left: 2px solid rgba(59,130,246,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }
