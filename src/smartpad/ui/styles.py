@@ -119,38 +119,32 @@ QWidget {
         stop:1 #6557d8
     );
     color: #ffffff;
-    border-radius: 19px 19px 5px 19px;
-    border-top: 1px solid rgba(255, 255, 255, 0.20);
-    border-left: 1px solid rgba(255, 255, 255, 0.10);
-    border-right: 1px solid rgba(0, 0, 0, 0.10);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.18);
-    padding: 12px 16px;
+    border-radius: 18px 18px 5px 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.22);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.20);
+    padding: 8px 14px;
 }
 #BubbleUser QLabel {
     background-color: transparent;
     color: #ffffff;
     font-size: 14px;
-    line-height: 1.4;
     letter-spacing: -0.005em;
 }
 
 #BubbleAI {
-    background-color: qlineargradient(
-        x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(255, 255, 255, 0.075),
-        stop:1 rgba(255, 255, 255, 0.035)
-    );
-    color: rgba(246, 246, 250, 0.96);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 5px 19px 19px 19px;
-    padding: 12px 16px;
+    /* Solid dark-grey iMessage-style — clearly visible against the
+       near-black panel, so light text reads cleanly. */
+    background-color: rgba(58, 58, 65, 0.92);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 5px 18px 18px 18px;
+    padding: 8px 14px;
 }
 #BubbleAI QLabel {
     background-color: transparent;
-    color: rgba(246, 246, 250, 0.96);
+    color: #ffffff;
     font-size: 14px;
-    line-height: 1.4;
     letter-spacing: -0.005em;
 }
 

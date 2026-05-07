@@ -452,8 +452,12 @@ class NoteCard(QWidget):
 
     def _show_palette(self) -> None:
         """Pop a small palette of swatches anchored under the button."""
-        from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QFrame  # noqa: PLC0415
-        popover = QFrame(self.window() or self)
+        from PyQt6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QFrame  # noqa: PLC0415
+        # Parent the popover to the top-level window so it isn't destroyed
+        # if the underlying NoteCard is rebuilt by a list refresh.
+        app = QApplication.instance()
+        top = app.activeWindow() if app is not None else self.window()
+        popover = QFrame(top)
         popover.setObjectName("NotePalettePopover")
         popover.setFrameShape(QFrame.Shape.NoFrame)
         popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -491,12 +495,25 @@ class NoteCard(QWidget):
         popover.show()
 
     def _pick_colour(self, name: str, popover: QWidget) -> None:
+        # Persist the choice FIRST — emit before touching visuals, so the
+        # DB write happens even if the underlying QWidget got recreated by a
+        # background reload between the popover opening and the user picking.
         self._color_name = name
         self._accent = palette_color(name)
-        self._sync_palette_button()
-        self.update()
-        self.color_changed.emit(name)
-        popover.close()
+        try:
+            self.color_changed.emit(name)
+        except RuntimeError:
+            pass
+        # Visual refresh — best-effort, may target a dead C++ widget
+        try:
+            self._sync_palette_button()
+            self.update()
+        except RuntimeError:
+            pass
+        try:
+            popover.close()
+        except RuntimeError:
+            pass
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         p = QPainter(self)

@@ -244,7 +244,7 @@ class ChatBubble(BubbleBase):
             return
         bubble_max = max(140, int(self.width() * 0.72))
         self._bubble_frame.setMaximumWidth(bubble_max)
-        label_max = max(80, bubble_max - 36)
+        label_max = max(80, bubble_max - 32)  # 14px QSS padding × 2 + a few px
 
         fm = QFontMetrics(self._label.font())
         text = self._base_text or " "
