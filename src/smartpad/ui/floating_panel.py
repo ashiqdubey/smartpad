@@ -192,6 +192,10 @@ class FloatingPanel(QWidget):
         self._note_bubbles: dict[int, Any] = {}
         self._note_processed.connect(self._apply_processed_note)
         self._drag_pos: QPoint | None = None
+        # Resize state
+        self._resize_edge: str | None = None
+        self._resize_start_geom: Any = None
+        self._resize_start_pos: QPoint | None = None
         # job_id → ChatBubble (AI placeholder while streaming)
         self._pending_jobs: dict[str, ChatBubble] = {}
         self._chat_history: list[ChatMessage] = []
@@ -201,6 +205,8 @@ class FloatingPanel(QWidget):
         self._apply_geometry()
         self._setup_slash_menu()
         self._connect_pool()
+        # Required for hover-cursor changes near edges
+        self.setMouseTracking(True)
 
         # Install event filter on application to detect click-outside
         QApplication.instance().installEventFilter(self)  # type: ignore[union-attr]
@@ -216,7 +222,9 @@ class FloatingPanel(QWidget):
             # No Tool flag — keeps it in taskbar and Alt+Tab
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setMinimumSize(440, 540)
+        # Min size leaves enough room for the browse tab list to be useful;
+        # panel is fully resizable past this via edge drag.
+        self.setMinimumSize(420, 480)
 
         # Drop shadow — kept moderate so Windows' UpdateLayeredWindowIndirect
         # doesn't choke on dirty rects extending too far past the panel rect.
@@ -337,6 +345,30 @@ class FloatingPanel(QWidget):
             self._browse_view.set_search(search)
         self._stack.setCurrentWidget(self._browse_view)
         self._update_header(mode="browse")
+        # Browse needs more screen real-estate. If the panel is still at the
+        # default chat size, expand it once. User can resize back via edges.
+        if self.width() < 640 or self.height() < 600:
+            self._auto_grow_for_browse()
+
+    def _auto_grow_for_browse(self) -> None:
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        target_w = 760
+        target_h = 640
+        if avail is not None:
+            target_w = min(target_w, avail.width() - 40)
+            target_h = min(target_h, avail.height() - 80)
+        cur = self.geometry()
+        new_w = max(cur.width(), target_w)
+        new_h = max(cur.height(), target_h)
+        # Re-anchor to keep the window on-screen
+        x = cur.x()
+        y = cur.y()
+        if avail is not None:
+            x = max(avail.left() + 8, min(x, avail.right() - new_w - 8))
+            y = max(avail.top() + 8, min(y, avail.bottom() - new_h - 8))
+        self.setGeometry(x, y, new_w, new_h)
+        self._save_geometry()
 
     def _update_header(self, mode: str) -> None:
         is_chat = mode == "chat"
@@ -675,6 +707,86 @@ class FloatingPanel(QWidget):
                 pass  # event without globalPosition (e.g. tablet events)
 
         return False
+
+    # ── Resize via edges ──────────────────────────────────────────────────────
+    EDGE_MARGIN = 6  # px hit-zone for resize on each edge
+
+    def _hit_edge(self, pos: QPoint) -> str | None:
+        """Return 'l'|'r'|'t'|'b'|'tl'|'tr'|'bl'|'br' or None."""
+        m = self.EDGE_MARGIN
+        x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
+        on_l, on_r = x < m, x > w - m
+        on_t, on_b = y < m, y > h - m
+        if on_t and on_l: return "tl"
+        if on_t and on_r: return "tr"
+        if on_b and on_l: return "bl"
+        if on_b and on_r: return "br"
+        if on_l: return "l"
+        if on_r: return "r"
+        if on_t: return "t"
+        if on_b: return "b"
+        return None
+
+    @staticmethod
+    def _cursor_for_edge(edge: str | None) -> Qt.CursorShape:
+        return {
+            "l": Qt.CursorShape.SizeHorCursor,
+            "r": Qt.CursorShape.SizeHorCursor,
+            "t": Qt.CursorShape.SizeVerCursor,
+            "b": Qt.CursorShape.SizeVerCursor,
+            "tl": Qt.CursorShape.SizeFDiagCursor,
+            "br": Qt.CursorShape.SizeFDiagCursor,
+            "tr": Qt.CursorShape.SizeBDiagCursor,
+            "bl": Qt.CursorShape.SizeBDiagCursor,
+        }.get(edge or "", Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            edge = self._hit_edge(event.position().toPoint())
+            if edge is not None:
+                self._resize_edge = edge
+                from PyQt6.QtCore import QRect  # noqa: PLC0415
+                self._resize_start_geom = QRect(self.geometry())
+                self._resize_start_pos = event.globalPosition().toPoint()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: Any) -> None:  # noqa: N802
+        if self._resize_edge is not None and self._resize_start_pos is not None:
+            delta = event.globalPosition().toPoint() - self._resize_start_pos
+            from PyQt6.QtCore import QRect  # noqa: PLC0415
+            new_geom = QRect(self._resize_start_geom)
+            edge = self._resize_edge
+            if "l" in edge:
+                new_geom.setLeft(new_geom.left() + delta.x())
+            if "r" in edge:
+                new_geom.setRight(new_geom.right() + delta.x())
+            if "t" in edge:
+                new_geom.setTop(new_geom.top() + delta.y())
+            if "b" in edge:
+                new_geom.setBottom(new_geom.bottom() + delta.y())
+            # Honour minimum size
+            if new_geom.width() >= self.minimumWidth() and new_geom.height() >= self.minimumHeight():
+                self.setGeometry(new_geom)
+            event.accept()
+            return
+        # Just hovering — change cursor near edges
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            edge = self._hit_edge(event.position().toPoint())
+            self.setCursor(self._cursor_for_edge(edge))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: Any) -> None:  # noqa: N802
+        if self._resize_edge is not None:
+            self._resize_edge = None
+            self._resize_start_geom = None
+            self._resize_start_pos = None
+            self._save_geometry()
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     # ── Drag via header ───────────────────────────────────────────────────────
 

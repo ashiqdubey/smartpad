@@ -14,6 +14,7 @@ Status dot: tiny circle top-right (saving -> saved -> error).
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -156,13 +157,8 @@ class ChatBubble(BubbleBase):
             self._label.setText(self._base_text + "|")
         else:
             self._label.setText(self._base_text)
-        # Recompute wrapped height for the current width so newly-streamed
-        # text doesn't overflow the bubble.
-        w = self._label.width()
-        if w > 0:
-            hfw = self._label.heightForWidth(w)
-            if hfw > 0:
-                self._label.setMinimumHeight(hfw)
+        # Re-size the bubble to match the new content (text-fit + wrap).
+        self._fit_label_to_content()
 
     @property
     def text(self) -> str:
@@ -170,16 +166,39 @@ class ChatBubble(BubbleBase):
 
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
-        if self.width() > 120:
-            bubble_max = max(140, int(self.width() * 0.72))
-            self._bubble_frame.setMaximumWidth(bubble_max)
-            label_width = max(80, bubble_max - 36)
-            self._label.setFixedWidth(label_width)
-            # CRITICAL: QLabel + wordWrap doesn't auto-grow vertically inside
-            # a QHBoxLayout. heightForWidth gives us the wrapped pixel height
-            # for the constrained width — set it as minimum so the bubble's
-            # box actually contains every wrapped line instead of clipping
-            # past the bottom or pushing past the right edge.
-            hfw = self._label.heightForWidth(label_width)
+        self._fit_label_to_content()
+
+    def _fit_label_to_content(self) -> None:
+        """Size the bubble to its text — shrink for short messages, wrap for
+        long ones. Uses QFontMetrics to find the natural unwrapped width and
+        chooses between fit-to-content vs fixed-max-with-wrap."""
+        if self.width() <= 120:
+            return
+        bubble_max = max(140, int(self.width() * 0.72))
+        self._bubble_frame.setMaximumWidth(bubble_max)
+        label_max = max(80, bubble_max - 36)
+
+        fm = QFontMetrics(self._label.font())
+        text = self._base_text or " "
+        longest = 0
+        for line in text.split("\n"):
+            line_w = fm.horizontalAdvance(line)
+            if line_w > longest:
+                longest = line_w
+
+        if longest <= label_max:
+            # Text fits without wrapping — shrink the bubble to it.
+            target = max(20, longest + 6)
+            self._label.setMaximumWidth(target)
+            self._label.setFixedWidth(target)
+            # Single-ish line height; heightForWidth handles explicit \n.
+            hfw = self._label.heightForWidth(target)
+            if hfw > 0:
+                self._label.setMinimumHeight(hfw)
+        else:
+            # Text would overflow — fix at the cap and let wordWrap fire.
+            self._label.setMaximumWidth(label_max)
+            self._label.setFixedWidth(label_max)
+            hfw = self._label.heightForWidth(label_max)
             if hfw > 0:
                 self._label.setMinimumHeight(hfw)
