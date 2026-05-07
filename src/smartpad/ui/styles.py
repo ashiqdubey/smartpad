@@ -47,9 +47,9 @@ QWidget {
     letter-spacing: -0.01em;
 }
 
-#CloseButton, #SettingsButton, #BrowseButton {
+#CloseButton, #SettingsButton, #BrowseButton, #HeaderBackButton {
     background-color: transparent;
-    color: rgba(246, 246, 250, 0.38);
+    color: rgba(246, 246, 250, 0.55);
     border: none;
     border-radius: 7px;
     font-size: 13px;
@@ -58,6 +58,15 @@ QWidget {
     min-height: 26px;
     max-width: 26px;
     max-height: 26px;
+}
+#HeaderBackButton {
+    color: rgba(246, 246, 250, 0.85);
+    font-size: 16px;
+    font-weight: 700;
+}
+#HeaderBackButton:hover {
+    background-color: rgba(124, 110, 245, 0.18);
+    color: #ffffff;
 }
 
 #CloseButton:hover {

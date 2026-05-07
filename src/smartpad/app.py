@@ -131,8 +131,24 @@ def run() -> None:
     tray = TrayIcon()
     tray.show_panel.connect(panel.toggle_panel)
     tray.quit_requested.connect(app.quit)
-    tray.open_settings.connect(lambda: _open_settings(panel))
-    tray.open_browse.connect(lambda: _open_browse(panel))
+
+    # In-panel navigation — tray menu items show the panel and switch the stack
+    def _show_settings() -> None:
+        if not panel.isVisible():
+            panel.show_panel()
+        panel.navigate_to_settings()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _show_browse() -> None:
+        if not panel.isVisible():
+            panel.show_panel()
+        panel.navigate_to_browse()
+        panel.raise_()
+        panel.activateWindow()
+
+    tray.open_settings.connect(_show_settings)
+    tray.open_browse.connect(_show_browse)
     tray.show()
     logger.debug("Tray icon shown.")
 
@@ -181,22 +197,6 @@ def run() -> None:
     pool.stop()
     logger.info("SmartPad exited with code {}.", exit_code)
     sys.exit(exit_code)
-
-
-def _open_settings(parent: object) -> None:
-    """Create and show the settings dialog."""
-    from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
-
-    dlg = SettingsDialog(parent=None)
-    dlg.exec()
-
-
-def _open_browse(parent: object) -> None:
-    """Create and show the browse window."""
-    from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
-
-    dlg = BrowseWindow(parent=None)
-    dlg.exec()
 
 
 def _settings_to_pynput(hotkey: str) -> str:

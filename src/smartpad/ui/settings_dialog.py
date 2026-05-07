@@ -1,15 +1,17 @@
-"""Settings dialog — fluid Aside-style UI with sliders, segmented controls and toggles."""
+"""Settings view — embedded inside the floating panel via a QStackedWidget.
+
+This replaces the separate QDialog window. The view emits saved/back_requested
+signals; the panel handles navigation back to chat.
+"""
 from __future__ import annotations
 
 import contextlib
 
 import keyring
 from loguru import logger
-from PyQt6.QtCore import Qt, QPoint, QSize
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from smartpad.config import load_settings
-from smartpad.ui.widgets import HourSlider, LogoMark, SegmentedControl, ToggleSwitch
+from smartpad.ui.widgets import HourSlider, SegmentedControl, ToggleSwitch
 
 _SVC = "smartpad"
 
@@ -36,112 +38,41 @@ def _kr(key: str) -> str:
         return ""
 
 
-class SettingsDialog(QDialog):
+class SettingsView(QWidget):
+    """Settings page — lives inside the floating panel's QStackedWidget."""
+
+    saved = pyqtSignal()
+    back_requested = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("SmartPad — Settings")
-        # Frameless but still on taskbar (Window flag, not Dialog)
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Window
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumSize(540, 620)
-        self.resize(560, 660)
         self._settings = load_settings()
-        self._drag_pos: QPoint | None = None
         self._setup_ui()
-
-    def paintEvent(self, event: object) -> None:  # noqa: N802
-        # Solid rounded fill — gradients here caused tab-switch crashes on Windows
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        p.fillPath(path, QColor(22, 20, 34, 247))
-        p.end()
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        root.addWidget(self._make_title_bar())
+        root.setContentsMargins(20, 8, 20, 16)
+        root.setSpacing(8)
 
         tabs = QTabWidget()
         tabs.setObjectName("SettingsTabs")
         tabs.addTab(self._make_general_tab(), "General")
         tabs.addTab(self._make_ai_tab(), "AI & Notifications")
         tabs.addTab(self._make_providers_tab(), "Providers")
+        root.addWidget(tabs, stretch=1)
 
-        content = QWidget()
-        cl = QVBoxLayout(content)
-        cl.setContentsMargins(20, 12, 20, 18)
-        cl.addWidget(tabs)
-        root.addWidget(content, stretch=1)
-
-    def _make_title_bar(self) -> QWidget:
-        bar = QWidget()
-        bar.setObjectName("DialogTitleBar")
-        bar.setFixedHeight(56)
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(10, 0, 14, 0)
-        row.setSpacing(8)
-
-        back_btn = QPushButton("←")
-        back_btn.setObjectName("DialogBackButton")
-        back_btn.setFixedSize(QSize(32, 32))
-        back_btn.setToolTip("Back  (Esc)")
-        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        back_btn.clicked.connect(self.reject)
-        row.addWidget(back_btn)
-
-        row.addWidget(LogoMark(20))
-
-        title = QLabel("Settings")
-        title.setObjectName("DialogTitle")
-        row.addWidget(title)
-        row.addStretch()
-
-        save_btn = QPushButton("Save")
+        # Save bar at the bottom of the view
+        save_row = QHBoxLayout()
+        save_row.setSpacing(8)
+        save_row.addStretch()
+        save_btn = QPushButton("Save changes")
         save_btn.setObjectName("DialogDoneButton")
-        save_btn.setFixedSize(QSize(70, 30))
+        save_btn.setMinimumHeight(34)
+        save_btn.setMinimumWidth(120)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self._save)
-
-        close_btn = QPushButton("✕")
-        close_btn.setObjectName("DialogCloseButton")
-        close_btn.setFixedSize(QSize(28, 28))
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.reject)
-
-        row.addWidget(save_btn)
-        row.addWidget(close_btn)
-
-        bar.mousePressEvent = self._bar_press   # type: ignore[method-assign]
-        bar.mouseMoveEvent = self._bar_move     # type: ignore[method-assign]
-        bar.mouseReleaseEvent = self._bar_release  # type: ignore[method-assign]
-        return bar
-
-    def _bar_press(self, event) -> None:  # type: ignore[no-untyped-def]
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def _bar_move(self, event) -> None:  # type: ignore[no-untyped-def]
-        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-
-    def _bar_release(self, event) -> None:  # type: ignore[no-untyped-def]
-        self._drag_pos = None
-
-    def keyPressEvent(self, event: object) -> None:  # noqa: N802
-        try:
-            if event.key() == Qt.Key.Key_Escape:  # type: ignore[union-attr]
-                self.reject()
-                return
-        except AttributeError:
-            pass
-        super().keyPressEvent(event)  # type: ignore[arg-type]
+        save_row.addWidget(save_btn)
+        root.addLayout(save_row)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -449,4 +380,5 @@ class SettingsDialog(QDialog):
             logger.info("Log level applied: {}", new_log_level)
         except Exception as exc:
             logger.warning("Could not re-apply log level live: {}", exc)
-        self.accept()
+        self.saved.emit()
+        self.back_requested.emit()

@@ -99,6 +99,8 @@ from smartpad.ui.bubbles.note_bubble import NoteBubble
 from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
 from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
 from smartpad.ui.bubbles.task_bubble import TaskBubble
+from smartpad.ui.browse_window import BrowseView
+from smartpad.ui.settings_dialog import SettingsView
 from smartpad.ui.slash_menu import SlashMenu
 from smartpad.ui.widgets import LogoMark
 
@@ -225,28 +227,41 @@ class FloatingPanel(QWidget):
         self.setGraphicsEffect(shadow)
 
     def _build_ui(self) -> None:
+        from PyQt6.QtWidgets import QStackedWidget  # noqa: PLC0415
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
         root.addWidget(self._build_header())
-        root.addWidget(self._build_chat_area(), stretch=1)
-        root.addWidget(self._build_input_area())
-        root.addWidget(self._build_status_bar())
+
+        # Stacked content — chat is always page 0; settings/browse are
+        # added lazily when the user navigates to them.
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("PanelStack")
+        self._chat_page = self._build_chat_page()
+        self._stack.addWidget(self._chat_page)
+        self._settings_view: SettingsView | None = None
+        self._browse_view: BrowseView | None = None
+        root.addWidget(self._stack, stretch=1)
+
+    def _build_chat_page(self) -> QWidget:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        v.addWidget(self._build_chat_area(), stretch=1)
+        v.addWidget(self._build_input_area())
+        v.addWidget(self._build_status_bar())
+        return page
 
     def _build_header(self) -> QWidget:
         header = QWidget()
         header.setObjectName("PanelHeader")
 
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(14, 0, 10, 0)
+        layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(8)
-
-        # Gradient brand mark
-        mark = LogoMark(20)
-
-        title = QLabel("SmartPad")
-        title.setObjectName("HeaderTitle")
 
         def _icon_btn(icon: str, tip: str) -> QPushButton:
             btn = QPushButton(icon)
@@ -255,95 +270,89 @@ class FloatingPanel(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             return btn
 
-        browse_btn = _icon_btn("📋", "Notes & Tasks  (☰)")
-        browse_btn.setObjectName("BrowseButton")
-        browse_btn.clicked.connect(self._open_browse)
+        # Back arrow — only shown on non-chat pages
+        self._back_btn = _icon_btn("←", "Back  (Esc)")
+        self._back_btn.setObjectName("HeaderBackButton")
+        self._back_btn.clicked.connect(self.navigate_to_chat)
+        self._back_btn.setVisible(False)
 
-        settings_btn = _icon_btn("⚙", "Settings")
-        settings_btn.setObjectName("SettingsButton")
-        settings_btn.clicked.connect(self._open_settings)
+        # Gradient brand mark — only on chat page
+        self._header_mark = LogoMark(20)
+
+        # Title text — changes per page
+        self._header_title = QLabel("SmartPad")
+        self._header_title.setObjectName("HeaderTitle")
+
+        # Action buttons — only on chat page
+        self._browse_btn = _icon_btn("📋", "Notes & Tasks")
+        self._browse_btn.setObjectName("BrowseButton")
+        self._browse_btn.clicked.connect(lambda: self.navigate_to_browse())
+
+        self._settings_btn = _icon_btn("⚙", "Settings")
+        self._settings_btn.setObjectName("SettingsButton")
+        self._settings_btn.clicked.connect(self.navigate_to_settings)
 
         close_btn = _icon_btn("✕", "Hide panel  (Esc)")
         close_btn.setObjectName("CloseButton")
         close_btn.clicked.connect(self.hide_panel)
 
-        layout.addWidget(mark)
-        layout.addWidget(title)
+        layout.addWidget(self._back_btn)
+        layout.addWidget(self._header_mark)
+        layout.addWidget(self._header_title)
         layout.addStretch()
-        layout.addWidget(browse_btn)
-        layout.addWidget(settings_btn)
+        layout.addWidget(self._browse_btn)
+        layout.addWidget(self._settings_btn)
         layout.addWidget(close_btn)
 
-        # Make the header draggable
+        # Make the header draggable (only when not interacting with buttons)
         header.mousePressEvent = self._header_mouse_press  # type: ignore[method-assign]
         header.mouseMoveEvent = self._header_mouse_move  # type: ignore[method-assign]
         header.mouseReleaseEvent = self._header_mouse_release  # type: ignore[method-assign]
 
+        self._header_widget = header
         return header
 
-    def _open_settings(self) -> None:
-        """Open the settings dialog as an independent top-level window.
+    # ── Navigation ────────────────────────────────────────────────────────────
 
-        We keep the floating panel visible underneath so the app's window
-        count never reaches zero — that's what was triggering the silent
-        app-quit when the user clicked the back button on Settings.
-        """
-        from smartpad.ui.settings_dialog import SettingsDialog  # noqa: PLC0415
+    def navigate_to_chat(self) -> None:
+        self._stack.setCurrentWidget(self._chat_page)
+        self._update_header(mode="chat")
 
-        # Defensive: some Qt builds drop the setting; re-assert it.
-        app = QApplication.instance()
-        if app is not None:
-            app.setQuitOnLastWindowClosed(False)
-        if not self.isVisible():
-            self.show_panel()
+    def navigate_to_settings(self) -> None:
+        if self._settings_view is None:
+            self._settings_view = SettingsView()
+            self._settings_view.back_requested.connect(self.navigate_to_chat)
+            self._stack.addWidget(self._settings_view)
+        self._stack.setCurrentWidget(self._settings_view)
+        self._update_header(mode="settings")
 
-        existing = getattr(self, "_settings_dlg", None)
-        if existing is not None and existing.isVisible():
-            existing.raise_()
-            existing.activateWindow()
-            return
-        dlg = SettingsDialog(parent=None)
-        self._settings_dlg = dlg
-        dlg.finished.connect(self._after_dialog_closed)
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-
-    def _open_browse(self, tab: int | None = None, search: str | None = None) -> None:
-        """Open the browse window. Optionally select tab and/or pre-fill search."""
-        from smartpad.ui.browse_window import BrowseWindow  # noqa: PLC0415
-
-        app = QApplication.instance()
-        if app is not None:
-            app.setQuitOnLastWindowClosed(False)
-        if not self.isVisible():
-            self.show_panel()
-
-        existing = getattr(self, "_browse_dlg", None)
-        if existing is not None and existing.isVisible():
-            if tab is not None:
-                existing.set_tab(tab)
-            if search is not None:
-                existing.set_search(search)
-            existing.raise_()
-            existing.activateWindow()
-            return
-        dlg = BrowseWindow(parent=None)
-        self._browse_dlg = dlg
+    def navigate_to_browse(self, tab: int | None = None, search: str | None = None) -> None:
+        if self._browse_view is None:
+            self._browse_view = BrowseView()
+            self._browse_view.back_requested.connect(self.navigate_to_chat)
+            self._stack.addWidget(self._browse_view)
         if tab is not None:
-            dlg.set_tab(tab)
+            self._browse_view.set_tab(tab)
         if search is not None:
-            dlg.set_search(search)
-        dlg.finished.connect(self._after_dialog_closed)
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+            self._browse_view.set_search(search)
+        self._stack.setCurrentWidget(self._browse_view)
+        self._update_header(mode="browse")
 
-    def _after_dialog_closed(self, *_args: Any) -> None:
-        """If the panel was hidden by an outside click during dialog use,
-        bring it back so the app stays anchored to a visible window."""
-        if not self.isVisible():
-            self.show_panel()
+    def _update_header(self, mode: str) -> None:
+        is_chat = mode == "chat"
+        self._back_btn.setVisible(not is_chat)
+        self._header_mark.setVisible(is_chat)
+        self._browse_btn.setVisible(is_chat)
+        self._settings_btn.setVisible(is_chat)
+        self._header_title.setText({
+            "chat": "SmartPad",
+            "settings": "Settings",
+            "browse": "Notes & Tasks",
+        }.get(mode, "SmartPad"))
+
+    # _open_settings/_open_browse removed — replaced by navigate_to_settings /
+    # navigate_to_browse which use the in-panel QStackedWidget instead of
+    # creating separate top-level windows.
 
     def _build_chat_area(self) -> QScrollArea:
         self._scroll = QScrollArea()
@@ -599,7 +608,11 @@ class FloatingPanel(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.hide_panel()
+            # On non-chat pages Esc means "back"; on chat page it hides the panel.
+            if self._stack.currentWidget() is not self._chat_page:
+                self.navigate_to_chat()
+            else:
+                self.hide_panel()
             return
         super().keyPressEvent(event)
 
@@ -797,26 +810,25 @@ class FloatingPanel(QWidget):
                 self._start_chat(result.body)
 
     def _handle_app_command(self, app_action: str, body: str, slash_cmd: str) -> None:
-        """Dispatch app/slash actions to actual handlers."""
-        # Browse aliases
+        """Dispatch app/slash actions to actual handlers — all in-panel."""
         TAB_NOTES, TAB_TASKS, TAB_REMINDERS, TAB_SNIPPETS = 0, 1, 2, 3
         if app_action in ("settings", "ai_settings", "model"):
-            self._open_settings()
+            self.navigate_to_settings()
             return
         if app_action in ("browse", "notes", "list_notes"):
-            self._open_browse(tab=TAB_NOTES)
+            self.navigate_to_browse(tab=TAB_NOTES)
             return
         if app_action == "list_tasks":
-            self._open_browse(tab=TAB_TASKS)
+            self.navigate_to_browse(tab=TAB_TASKS)
             return
         if app_action == "today":
-            self._open_browse(tab=TAB_TASKS)
+            self.navigate_to_browse(tab=TAB_TASKS)
             return
         if app_action == "list_snippets":
-            self._open_browse(tab=TAB_SNIPPETS)
+            self.navigate_to_browse(tab=TAB_SNIPPETS)
             return
         if app_action == "search":
-            self._open_browse(tab=TAB_NOTES, search=body)
+            self.navigate_to_browse(tab=TAB_NOTES, search=body)
             return
         if app_action == "clear_chat":
             self._clear_chat()

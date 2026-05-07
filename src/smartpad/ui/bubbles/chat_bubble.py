@@ -156,6 +156,13 @@ class ChatBubble(BubbleBase):
             self._label.setText(self._base_text + "|")
         else:
             self._label.setText(self._base_text)
+        # Recompute wrapped height for the current width so newly-streamed
+        # text doesn't overflow the bubble.
+        w = self._label.width()
+        if w > 0:
+            hfw = self._label.heightForWidth(w)
+            if hfw > 0:
+                self._label.setMinimumHeight(hfw)
 
     @property
     def text(self) -> str:
@@ -164,10 +171,15 @@ class ChatBubble(BubbleBase):
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
         if self.width() > 120:
-            # Bubble caps at 72% of the chat area — same proportion iMessage
-            # uses; leaves a clear off-side gutter (via addStretch).
             bubble_max = max(140, int(self.width() * 0.72))
             self._bubble_frame.setMaximumWidth(bubble_max)
-            # Label cap accounts for QSS padding (12 vertical / 16 horizontal)
-            # — total horizontal is 32px.
-            self._label.setMaximumWidth(max(80, bubble_max - 36))
+            label_width = max(80, bubble_max - 36)
+            self._label.setFixedWidth(label_width)
+            # CRITICAL: QLabel + wordWrap doesn't auto-grow vertically inside
+            # a QHBoxLayout. heightForWidth gives us the wrapped pixel height
+            # for the constrained width — set it as minimum so the bubble's
+            # box actually contains every wrapped line instead of clipping
+            # past the bottom or pushing past the right edge.
+            hfw = self._label.heightForWidth(label_width)
+            if hfw > 0:
+                self._label.setMinimumHeight(hfw)

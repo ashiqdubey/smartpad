@@ -1,14 +1,12 @@
-"""Browse window — view all notes, tasks, reminders, snippets."""
+"""Browse view — embedded inside the floating panel via QStackedWidget."""
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
 from loguru import logger
-from PyQt6.QtCore import Qt, QPoint, QSize, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QRadialGradient  # noqa: F401
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from smartpad.core.event_bus import event_bus
-from smartpad.ui.widgets import LogoMark, NoteCard
+from smartpad.ui.widgets import NoteCard
 
 
 class _DBLoader(QThread):
@@ -33,7 +31,7 @@ class _DBLoader(QThread):
         try:
             result = asyncio.run(self._load())
         except Exception as exc:
-            logger.error("BrowseWindow DB load failed: {}", exc)
+            logger.error("BrowseView DB load failed: {}", exc)
             result = ([], [], [], [])
         self.finished.emit(*result)
 
@@ -56,20 +54,13 @@ class _DBLoader(QThread):
         return notes, tasks, reminders, snippets
 
 
-class BrowseWindow(QDialog):
+class BrowseView(QWidget):
+    """Browse page — lives inside the floating panel's QStackedWidget."""
+
+    back_requested = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("SmartPad — Notes & Tasks")
-        # Window flag (not Dialog) — keeps it on the taskbar
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Window
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumSize(760, 540)
-        self.resize(840, 580)
-        self._drag_pos: QPoint | None = None
         self._all_notes: list[Any] = []
         self._all_tasks: list[Any] = []
         self._all_reminders: list[Any] = []
@@ -78,34 +69,18 @@ class BrowseWindow(QDialog):
         self._setup_ui()
         self._load()
 
-        # Live refresh: when the panel saves something, reload our lists.
+        # Live refresh — panel saves notify us via the bus.
         event_bus().item_saved.connect(self._on_item_saved)
 
-        # Poll fallback — covers the case where the bus signal was missed
-        # (e.g. saved from the API server in another process).
+        # Poll fallback for cross-process saves (e.g. from the API server).
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(4000)
         self._poll_timer.timeout.connect(self._load)
         self._poll_timer.start()
 
-    def paintEvent(self, event: object) -> None:  # noqa: N802
-        # Solid rounded fill — gradients here caused tab-switch crashes on Windows
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 16.0, 16.0)
-        p.fillPath(path, QColor(22, 20, 34, 247))
-        p.end()
-
     def _setup_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        root.addWidget(self._make_title_bar())
-
-        content = QWidget()
-        cl = QVBoxLayout(content)
-        cl.setContentsMargins(20, 10, 20, 16)
+        cl = QVBoxLayout(self)
+        cl.setContentsMargins(20, 8, 20, 16)
         cl.setSpacing(10)
 
         # Search row
@@ -155,45 +130,6 @@ class BrowseWindow(QDialog):
         self._status.setObjectName("BrowseStatus")
         cl.addWidget(self._status)
 
-        root.addWidget(content, stretch=1)
-
-    def _make_title_bar(self) -> QWidget:
-        bar = QWidget()
-        bar.setObjectName("DialogTitleBar")
-        bar.setFixedHeight(56)
-
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(10, 0, 14, 0)
-        row.setSpacing(8)
-
-        # Back button — dismisses the dialog and returns focus to whatever was active
-        back_btn = QPushButton("←")
-        back_btn.setObjectName("DialogBackButton")
-        back_btn.setFixedSize(QSize(32, 32))
-        back_btn.setToolTip("Back  (Esc)")
-        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        back_btn.clicked.connect(self.close)
-        row.addWidget(back_btn)
-
-        row.addWidget(LogoMark(20))
-
-        title = QLabel("Notes & Tasks")
-        title.setObjectName("DialogTitle")
-        row.addWidget(title)
-        row.addStretch()
-
-        close_btn = QPushButton("✕")
-        close_btn.setObjectName("DialogCloseButton")
-        close_btn.setFixedSize(QSize(28, 28))
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.close)
-        row.addWidget(close_btn)
-
-        bar.mousePressEvent = self._bar_press   # type: ignore[method-assign]
-        bar.mouseMoveEvent = self._bar_move     # type: ignore[method-assign]
-        bar.mouseReleaseEvent = self._bar_release  # type: ignore[method-assign]
-        return bar
-
     @pyqtSlot(str)
     def _on_item_saved(self, _kind: str) -> None:
         """Event-bus slot — reload lists when anything is saved app-wide."""
@@ -208,26 +144,28 @@ class BrowseWindow(QDialog):
         """Set the search filter text."""
         self._search.setText(query or "")
 
-    def keyPressEvent(self, event: object) -> None:  # noqa: N802
-        # Esc closes the window — common back-button shortcut
+    def teardown(self) -> None:
+        """Stop timers + disconnect listeners. Called by FloatingPanel
+        before the panel is destroyed."""
+        if hasattr(self, "_poll_timer"):
+            self._poll_timer.stop()
         try:
-            if event.key() == Qt.Key.Key_Escape:  # type: ignore[union-attr]
-                self.close()
-                return
-        except AttributeError:
+            event_bus().item_saved.disconnect(self._on_item_saved)
+        except (TypeError, RuntimeError):
             pass
-        super().keyPressEvent(event)  # type: ignore[arg-type]
-
-    def _bar_press(self, event) -> None:  # type: ignore[no-untyped-def]
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def _bar_move(self, event) -> None:  # type: ignore[no-untyped-def]
-        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-
-    def _bar_release(self, event) -> None:  # type: ignore[no-untyped-def]
-        self._drag_pos = None
+        loader = self._loader
+        if loader is not None:
+            try:
+                loader.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                if loader.isRunning():
+                    loader.quit()
+                    loader.wait(2000)
+            except RuntimeError:
+                pass
+        self._loader = None
 
     # ── Data loading ──────────────────────────────────────────────────────────
 
@@ -255,32 +193,6 @@ class BrowseWindow(QDialog):
         self._all_reminders = reminders
         self._all_snippets = snippets
         self._populate(self._search.text())
-
-    def closeEvent(self, event: object) -> None:  # noqa: N802
-        # Stop polling first so no Qt timer fires after teardown
-        if hasattr(self, "_poll_timer"):
-            self._poll_timer.stop()
-        # Detach event-bus listener
-        try:
-            event_bus().item_saved.disconnect(self._on_item_saved)
-        except (TypeError, RuntimeError):
-            pass
-        # Disconnect signal so a late-arriving DB result doesn't poke a dead UI
-        loader = self._loader
-        if loader is not None:
-            try:
-                loader.finished.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            try:
-                if loader.isRunning():
-                    loader.quit()
-                    loader.wait(2000)
-            except RuntimeError:
-                # C++ object already gone — nothing to do
-                pass
-        self._loader = None
-        super().closeEvent(event)  # type: ignore[arg-type]
 
     def _filter(self, text: str) -> None:
         self._populate(text)
