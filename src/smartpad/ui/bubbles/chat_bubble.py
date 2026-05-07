@@ -68,6 +68,44 @@ class ChatBubble(BubbleBase):
         elif streaming:
             self._start_streaming()
 
+    # Inline bubble QSS — applied per-widget so it can't be overridden by
+    # a stale or light-themed app-level stylesheet. (We had reports of
+    # AI bubbles rendering light-grey-with-dark-text even after the theme
+    # was supposedly forced to dark; this guarantees the visual.)
+    _USER_QSS = (
+        "#BubbleUser {"
+        " background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        "  stop:0 #9587ff, stop:0.55 #7c6ef5, stop:1 #6557d8);"
+        " color: #ffffff;"
+        " border-radius: 18px 18px 5px 18px;"
+        " border-top: 1px solid rgba(255,255,255,0.22);"
+        " border-bottom: 1px solid rgba(0,0,0,0.20);"
+        " padding: 7px 13px;"
+        "}"
+        "#BubbleUser QLabel {"
+        " background-color: transparent;"
+        " color: #ffffff;"
+        " font-size: 13.5px;"
+        " letter-spacing: -0.005em;"
+        "}"
+    )
+    _AI_QSS = (
+        "#BubbleAI {"
+        " background-color: rgba(58, 58, 65, 0.92);"
+        " color: #ffffff;"
+        " border: 1px solid rgba(255,255,255,0.10);"
+        " border-top: 1px solid rgba(255,255,255,0.18);"
+        " border-radius: 5px 18px 18px 18px;"
+        " padding: 7px 13px;"
+        "}"
+        "#BubbleAI QLabel {"
+        " background-color: transparent;"
+        " color: #ffffff;"
+        " font-size: 13.5px;"
+        " letter-spacing: -0.005em;"
+        "}"
+    )
+
     def _build_ui(self) -> None:
         is_user = self._role == "user"
 
@@ -82,6 +120,8 @@ class ChatBubble(BubbleBase):
 
         self._bubble_frame = QWidget(self._content_widget)
         self._bubble_frame.setObjectName("BubbleUser" if is_user else "BubbleAI")
+        # Apply inline QSS that beats anything set at the app level
+        self._bubble_frame.setStyleSheet(self._USER_QSS if is_user else self._AI_QSS)
         self._bubble_frame.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
@@ -93,6 +133,13 @@ class ChatBubble(BubbleBase):
         self._label = QLabel()
         self._label.setWordWrap(True)
         self._label.setMinimumWidth(0)
+        # Bullet-proof colour: set the palette directly. Even if QSS is
+        # somehow not applied, the QLabel renders white text.
+        from PyQt6.QtGui import QPalette  # noqa: PLC0415
+        pal = self._label.palette()
+        pal.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
+        pal.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
+        self._label.setPalette(pal)
         # PlainText: respect the user's newlines (Shift+Enter) AND avoid the
         # default rich-text mode interpreting "<" / "&" / etc. as markup.
         self._label.setTextFormat(Qt.TextFormat.PlainText)

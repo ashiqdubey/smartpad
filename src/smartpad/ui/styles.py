@@ -796,17 +796,12 @@ QSplitter::handle { background-color: rgba(26,24,48,0.06); width: 1px; }
 
 
 def get_theme(name: str) -> str:
-    if name == "dark":
-        return DARK_THEME
+    """Return the QSS for the requested theme.
+
+    The FloatingPanel paintEvent always renders a dark background regardless
+    of system theme, so light-theme widgets-on-dark-panel never made sense
+    visually. Default to DARK_THEME unless the user explicitly chose light.
+    """
     if name == "light":
         return LIGHT_THEME
-    try:
-        from PyQt6.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app is not None:
-            bg = app.palette().window().color()
-            if bg.lightness() < 128:
-                return DARK_THEME
-        return LIGHT_THEME
-    except Exception:
-        return DARK_THEME
+    return DARK_THEME
