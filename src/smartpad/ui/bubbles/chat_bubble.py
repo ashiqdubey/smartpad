@@ -45,8 +45,15 @@ class _BubbleFrame(QWidget):
     def __init__(self, is_user: bool, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._is_user = is_user
-        # Background still wins — make sure we're not drawing translucent
+        # Disable widget styled background so the QSS engine can't paint
+        # a colour over our paintEvent. The objectName is intentionally
+        # empty so app-level #BubbleAI / #BubbleUser rules don't match.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        # Override any inherited QSS background — paintEvent owns the
+        # bubble fill. Border 0 disables the QSS border draw too.
+        self.setStyleSheet(
+            "QWidget { background: transparent; border: none; padding: 0; }"
+        )
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         p = QPainter(self)
@@ -189,8 +196,9 @@ class ChatBubble(BubbleBase):
 
         # Custom-painted bubble — guaranteed to render correctly regardless
         # of theme, QSS load order, or per-widget stylesheet propagation.
+        # NO objectName — that way app-level #BubbleAI/#BubbleUser rules
+        # don't match and can't paint over our paintEvent.
         self._bubble_frame = _BubbleFrame(is_user, self._content_widget)
-        self._bubble_frame.setObjectName("BubbleUser" if is_user else "BubbleAI")
         self._bubble_frame.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
