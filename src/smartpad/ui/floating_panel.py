@@ -355,8 +355,8 @@ class FloatingPanel(QWidget):
         self._chat_container = QWidget()
         self._chat_container.setObjectName("ChatContainer")
         self._chat_layout = QVBoxLayout(self._chat_container)
-        self._chat_layout.setContentsMargins(2, 12, 2, 6)
-        self._chat_layout.setSpacing(8)
+        self._chat_layout.setContentsMargins(4, 14, 4, 8)
+        self._chat_layout.setSpacing(12)  # iMessage-style breathing room
         self._chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         # Spacer so bubbles hug top
         self._chat_layout.addStretch()

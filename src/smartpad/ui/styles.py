@@ -101,29 +101,48 @@ QWidget {
    User:  accent purple bg, white text, bottom-right nub
    AI:    barely-there glass, subtle border, bottom-left nub
    ────────────────────────────────────────────────────────────────────────── */
+/* iMessage-style chat bubbles — vertical gradient, soft tail, top highlight */
 #BubbleUser {
-    background-color: #7c6ef5;
+    background-color: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #9587ff,
+        stop:0.55 #7c6ef5,
+        stop:1 #6557d8
+    );
     color: #ffffff;
-    border-radius: 14px 14px 5px 14px;
-    padding: 10px 14px;
+    border-radius: 19px 19px 5px 19px;
+    border-top: 1px solid rgba(255, 255, 255, 0.20);
+    border-left: 1px solid rgba(255, 255, 255, 0.10);
+    border-right: 1px solid rgba(0, 0, 0, 0.10);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+    padding: 12px 16px;
 }
 #BubbleUser QLabel {
     background-color: transparent;
     color: #ffffff;
-    font-size: 13.5px;
+    font-size: 14px;
+    line-height: 1.4;
+    letter-spacing: -0.005em;
 }
 
 #BubbleAI {
-    background-color: rgba(246, 246, 250, 0.05);
-    color: rgba(246, 246, 250, 0.92);
-    border: 1px solid rgba(240, 240, 248, 0.10);
-    border-radius: 5px 14px 14px 14px;
-    padding: 10px 14px;
+    background-color: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 0.075),
+        stop:1 rgba(255, 255, 255, 0.035)
+    );
+    color: rgba(246, 246, 250, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 5px 19px 19px 19px;
+    padding: 12px 16px;
 }
 #BubbleAI QLabel {
     background-color: transparent;
-    color: rgba(246, 246, 250, 0.92);
-    font-size: 13.5px;
+    color: rgba(246, 246, 250, 0.96);
+    font-size: 14px;
+    line-height: 1.4;
+    letter-spacing: -0.005em;
 }
 
 /* Saved-note bubble — warm amber sticky-note treatment */
@@ -612,10 +631,10 @@ QLabel { background-color: transparent; color: #1a1830; }
 #ChatScrollArea QScrollBar::add-line:vertical, #ChatScrollArea QScrollBar::sub-line:vertical { height: 0; }
 #ChatContainer { background-color: transparent; }
 
-#BubbleUser { background-color: #7c6ef5; color: #fff; border-radius: 14px 14px 5px 14px; padding: 10px 14px; }
-#BubbleUser QLabel { background-color: transparent; color: #fff; font-size: 13.5px; }
-#BubbleAI { background-color: rgba(26,24,48,0.05); color: #1a1830; border: 1px solid rgba(26,24,48,0.08); border-radius: 5px 14px 14px 14px; padding: 10px 14px; }
-#BubbleAI QLabel { background-color: transparent; color: #1a1830; font-size: 13.5px; }
+#BubbleUser { background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #9587ff,stop:0.55 #7c6ef5,stop:1 #6557d8); color: #fff; border-radius: 19px 19px 5px 19px; border-top: 1px solid rgba(255,255,255,0.20); border-bottom: 1px solid rgba(0,0,0,0.18); padding: 12px 16px; }
+#BubbleUser QLabel { background-color: transparent; color: #fff; font-size: 14px; line-height: 1.4; letter-spacing: -0.005em; }
+#BubbleAI { background-color: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 rgba(255,255,255,0.95),stop:1 rgba(245,245,250,0.85)); color: #1a1830; border: 1px solid rgba(26,24,48,0.10); border-radius: 5px 19px 19px 19px; padding: 12px 16px; }
+#BubbleAI QLabel { background-color: transparent; color: #1a1830; font-size: 14px; line-height: 1.4; letter-spacing: -0.005em; }
 #BubbleNote { background-color: rgba(124,110,245,0.06); color: #3d2e99; border: 1px solid rgba(124,110,245,0.12); border-left: 2px solid rgba(124,110,245,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }
 #BubbleNote QLabel { background-color: transparent; }
 #BubbleTask { background-color: rgba(59,130,246,0.06); color: #1e3a8a; border: 1px solid rgba(59,130,246,0.12); border-left: 2px solid rgba(59,130,246,0.55); border-radius: 10px; padding: 9px 13px 9px 12px; margin: 3px 10px; }

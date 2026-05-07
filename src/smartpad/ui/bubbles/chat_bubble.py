@@ -164,13 +164,10 @@ class ChatBubble(BubbleBase):
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
         if self.width() > 120:
-            # Bubble takes at most 78% of the chat area width; remaining 22%
-            # forms the visual off-side gutter (via addStretch on one side).
-            bubble_max = max(140, int(self.width() * 0.78))
+            # Bubble caps at 72% of the chat area — same proportion iMessage
+            # uses; leaves a clear off-side gutter (via addStretch).
+            bubble_max = max(140, int(self.width() * 0.72))
             self._bubble_frame.setMaximumWidth(bubble_max)
-            # CRITICAL: also constrain the QLabel directly. QLabel.wordWrap
-            # only fires when the label's own width is finite — propagating
-            # via the QHBoxLayout alone isn't enough on every Qt build.
-            # Account for QSS padding (10px top/bottom, 14px left/right) +
-            # inner layout margins (0). The horizontal padding totals 28px.
-            self._label.setMaximumWidth(max(80, bubble_max - 32))
+            # Label cap accounts for QSS padding (12 vertical / 16 horizontal)
+            # — total horizontal is 32px.
+            self._label.setMaximumWidth(max(80, bubble_max - 36))
