@@ -100,6 +100,7 @@ from smartpad.ui.bubbles.reminder_bubble import ReminderBubble
 from smartpad.ui.bubbles.snippet_bubble import SnippetBubble
 from smartpad.ui.bubbles.task_bubble import TaskBubble
 from smartpad.ui.browse_window import BrowseView
+from smartpad.ui.note_editor import NoteEditorView
 from smartpad.ui.settings_dialog import SettingsView
 from smartpad.ui.slash_menu import SlashMenu
 from smartpad.ui.widgets import LogoMark
@@ -251,6 +252,7 @@ class FloatingPanel(QWidget):
         self._stack.addWidget(self._chat_page)
         self._settings_view: SettingsView | None = None
         self._browse_view: BrowseView | None = None
+        self._note_editor_view: NoteEditorView | None = None
         root.addWidget(self._stack, stretch=1)
 
     def _build_chat_page(self) -> QWidget:
@@ -338,6 +340,7 @@ class FloatingPanel(QWidget):
         if self._browse_view is None:
             self._browse_view = BrowseView()
             self._browse_view.back_requested.connect(self.navigate_to_chat)
+            self._browse_view.note_edit_requested.connect(self.navigate_to_note_editor)
             self._stack.addWidget(self._browse_view)
         if tab is not None:
             self._browse_view.set_tab(tab)
@@ -370,6 +373,44 @@ class FloatingPanel(QWidget):
         self.setGeometry(x, y, new_w, new_h)
         self._save_geometry()
 
+    def navigate_to_note_editor(self, note_id: str) -> None:
+        """Open the note editor with the given DB note id."""
+        if self._note_editor_view is None:
+            self._note_editor_view = NoteEditorView()
+            self._note_editor_view.back_requested.connect(self._return_from_editor)
+            self._stack.addWidget(self._note_editor_view)
+
+        # Load the note from DB then show the editor
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        def _on_loaded(note: Any) -> None:
+            self._note_editor_view.load(note)
+            self._stack.setCurrentWidget(self._note_editor_view)
+            self._update_header(mode="editor")
+
+        async def _do() -> None:
+            try:
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.repositories.notes import NotesRepo  # noqa: PLC0415
+                async with get_async_session() as s:
+                    note = await NotesRepo(s).get(note_id)
+                # marshal back to UI thread
+                from PyQt6.QtCore import QMetaObject  # noqa: PLC0415
+                QTimer.singleShot(0, lambda n=note: _on_loaded(n))
+            except Exception as exc:
+                logger.error("Note load failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
+
+    def _return_from_editor(self) -> None:
+        """Editor → back: go to browse if it exists, else chat."""
+        if self._browse_view is not None:
+            self._stack.setCurrentWidget(self._browse_view)
+            self._update_header(mode="browse")
+        else:
+            self.navigate_to_chat()
+
     def _update_header(self, mode: str) -> None:
         is_chat = mode == "chat"
         self._back_btn.setVisible(not is_chat)
@@ -380,7 +421,17 @@ class FloatingPanel(QWidget):
             "chat": "SmartPad",
             "settings": "Settings",
             "browse": "Notes & Tasks",
+            "editor": "Edit Note",
         }.get(mode, "SmartPad"))
+        # Editor should return to browse, not chat
+        try:
+            self._back_btn.clicked.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        if mode == "editor":
+            self._back_btn.clicked.connect(self._return_from_editor)
+        else:
+            self._back_btn.clicked.connect(self.navigate_to_chat)
 
     # _open_settings/_open_browse removed — replaced by navigate_to_settings /
     # navigate_to_browse which use the in-panel QStackedWidget instead of
@@ -997,6 +1048,33 @@ class FloatingPanel(QWidget):
         bubble.set_status("saved")
         self._add_widget(bubble)
 
+    def _regenerate_for(self, ai_bubble: ChatBubble) -> None:
+        """Re-run the chat using the most recent user message in history.
+
+        Strategy: drop the trailing assistant turn (this bubble's content),
+        keep history intact otherwise, and start a fresh stream from the
+        last user prompt. The old bubble is removed; a new one streams.
+        """
+        # Find last user message
+        last_user = next(
+            (m.content for m in reversed(self._chat_history) if m.role == "user"),
+            None,
+        )
+        if not last_user:
+            self._set_status("Nothing to regenerate")
+            return
+        # Drop the most recent assistant message from history (the one this
+        # bubble represents). If there's no trailing assistant entry, no-op.
+        if self._chat_history and self._chat_history[-1].role == "assistant":
+            self._chat_history.pop()
+        # Remove the old bubble from the layout
+        idx = self._chat_layout.indexOf(ai_bubble)
+        if idx >= 0:
+            self._chat_layout.removeWidget(ai_bubble)
+            ai_bubble.deleteLater()
+        self._set_status("Regenerating…")
+        self._start_chat(last_user)
+
     def _start_chat(self, text: str) -> None:
         """Stream LLM response via a dedicated QThread (true per-token streaming)."""
         provider = self._get_provider()
@@ -1010,6 +1088,10 @@ class FloatingPanel(QWidget):
             return
 
         ai_bubble = ChatBubble(role="assistant", text="", streaming=True)
+        ai_bubble.copied.connect(lambda: self._set_status("Copied to clipboard"))
+        ai_bubble.regenerate_requested.connect(
+            lambda b=ai_bubble: self._regenerate_for(b)
+        )
         self._add_widget(ai_bubble)
         self._set_status("Thinking…")
 

@@ -13,11 +13,13 @@ Status dot: tiny circle top-right (saving -> saved -> error).
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QWidget,
 )
@@ -36,6 +38,10 @@ class ChatBubble(BubbleBase):
     """
 
     _BLINK_MS = 500
+
+    # Emitted when the user clicks the regenerate (↻) action on an AI bubble.
+    regenerate_requested = pyqtSignal()
+    copied = pyqtSignal()  # tiny signal so the panel can flash a "Copied" status
 
     def __init__(
         self,
@@ -104,6 +110,66 @@ class ChatBubble(BubbleBase):
 
         if not is_user:
             self._content_layout.addStretch()
+            # Action overlay (copy + regenerate) — AI bubbles only
+            self._build_action_overlay()
+
+    def _build_action_overlay(self) -> None:
+        """Hover-revealed bar with 📋 Copy and ↻ Regenerate (top-right of bubble)."""
+        self._actions = QWidget(self._bubble_frame)
+        self._actions.setObjectName("BubbleActionBar")
+        self._actions.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row = QHBoxLayout(self._actions)
+        row.setContentsMargins(2, 2, 2, 2)
+        row.setSpacing(0)
+
+        copy_btn = QPushButton("⧉")
+        copy_btn.setObjectName("BubbleActionBtn")
+        copy_btn.setToolTip("Copy")
+        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setFixedSize(22, 22)
+        copy_btn.clicked.connect(self._on_copy)
+        row.addWidget(copy_btn)
+
+        regen_btn = QPushButton("↻")
+        regen_btn.setObjectName("BubbleActionBtn")
+        regen_btn.setToolTip("Regenerate")
+        regen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        regen_btn.setFixedSize(22, 22)
+        regen_btn.clicked.connect(self.regenerate_requested.emit)
+        row.addWidget(regen_btn)
+
+        self._actions.adjustSize()
+        self._actions.hide()
+        # Track hover via event filter on the bubble frame
+        self._bubble_frame.installEventFilter(self)
+        self._bubble_frame.setMouseTracking(True)
+
+    def _on_copy(self) -> None:
+        cb = QApplication.clipboard()
+        if cb is not None:
+            cb.setText(self._base_text)
+        self.copied.emit()
+
+    def _reposition_actions(self) -> None:
+        if not hasattr(self, "_actions"):
+            return
+        bw = self._bubble_frame.width()
+        # Anchor to the top-right corner, slightly above the bubble
+        self._actions.adjustSize()
+        x = max(0, bw - self._actions.width() - 4)
+        y = -self._actions.height() // 2 + 6
+        self._actions.move(x, y)
+        self._actions.raise_()
+
+    def eventFilter(self, obj: object, event: object) -> bool:  # noqa: N802
+        if obj is self._bubble_frame and hasattr(self, "_actions"):
+            t = event.type()  # type: ignore[union-attr]
+            if t == QEvent.Type.Enter:
+                self._reposition_actions()
+                self._actions.show()
+            elif t == QEvent.Type.Leave:
+                self._actions.hide()
+        return super().eventFilter(obj, event)  # type: ignore[arg-type]
 
     def set_content(self, text: str, streaming: bool = False) -> None:
         """Update the displayed text.
@@ -167,6 +233,8 @@ class ChatBubble(BubbleBase):
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
         self._fit_label_to_content()
+        if hasattr(self, "_actions") and self._actions.isVisible():
+            self._reposition_actions()
 
     def _fit_label_to_content(self) -> None:
         """Size the bubble to its text — shrink for short messages, wrap for

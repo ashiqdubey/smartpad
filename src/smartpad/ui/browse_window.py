@@ -58,6 +58,7 @@ class BrowseView(QWidget):
     """Browse page — lives inside the floating panel's QStackedWidget."""
 
     back_requested = pyqtSignal()
+    note_edit_requested = pyqtSignal(str)  # note_id
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -105,6 +106,9 @@ class BrowseView(QWidget):
         self._reminders_list = QListWidget()
         self._snippets_list = QListWidget()
 
+        # Notes — clicking a card opens the editor
+        self._notes_list.itemClicked.connect(self._on_note_clicked)
+
         for name, lst in [
             ("Notes", self._notes_list),
             ("Tasks", self._tasks_list),
@@ -143,6 +147,36 @@ class BrowseView(QWidget):
     def set_search(self, query: str) -> None:
         """Set the search filter text."""
         self._search.setText(query or "")
+
+    def _on_note_clicked(self, item: QListWidgetItem) -> None:
+        """Bubble the click up so FloatingPanel can open the note editor."""
+        note_id = item.data(Qt.ItemDataRole.UserRole + 1)
+        if note_id:
+            self.note_edit_requested.emit(str(note_id))
+
+    def _set_note_color(self, note_id: str, color_name: str) -> None:
+        """Persist a colour change to the DB. Fire-and-forget background task."""
+        import asyncio  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+
+        async def _do() -> None:
+            try:
+                from smartpad.db.engine import get_async_session  # noqa: PLC0415
+                from smartpad.db.repositories.notes import NotesRepo  # noqa: PLC0415
+                async with get_async_session() as s:
+                    note = await NotesRepo(s).get(note_id)
+                    if note is not None:
+                        note.color = color_name
+                        await NotesRepo(s).save(note)
+                # Update our cached copy so the next reload doesn't flicker
+                for n in self._all_notes:
+                    if n.id == note_id:
+                        n.color = color_name
+                        break
+            except Exception as exc:
+                logger.error("Note colour update failed: {}", exc)
+
+        threading.Thread(target=lambda: asyncio.run(_do()), daemon=True).start()
 
     def teardown(self) -> None:
         """Stop timers + disconnect listeners. Called by FloatingPanel
@@ -209,9 +243,20 @@ class BrowseView(QWidget):
         for n in self._all_notes:
             if _match(n.content):
                 when = self._humanize_time(getattr(n, "created_at", None))
-                card = NoteCard(content=n.content, when=when, glyph="✎")
+                color = getattr(n, "color", None) or "amber"
+                card = NoteCard(
+                    content=n.content,
+                    when=when,
+                    glyph="✎",
+                    color_name=color,
+                )
+                card.color_changed.connect(
+                    lambda new_color, nid=n.id: self._set_note_color(nid, new_color)
+                )
                 item = QListWidgetItem()
+                # UserRole = preview text; UserRole+1 = note id (for editor open)
                 item.setData(Qt.ItemDataRole.UserRole, n.content)
+                item.setData(Qt.ItemDataRole.UserRole + 1, n.id)
                 item.setSizeHint(card.sizeHint())
                 self._notes_list.addItem(item)
                 self._notes_list.setItemWidget(item, card)

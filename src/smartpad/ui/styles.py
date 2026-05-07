@@ -154,6 +154,67 @@ QWidget {
     letter-spacing: -0.005em;
 }
 
+/* Note editor — toolbar / source / preview / cancel */
+#EditorToolBtn {
+    background-color: rgba(246, 246, 250, 0.05);
+    color: rgba(246, 246, 250, 0.85);
+    border: 1px solid rgba(240, 240, 248, 0.10);
+    border-radius: 7px;
+    padding: 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+#EditorToolBtn:hover {
+    background-color: rgba(124, 110, 245, 0.20);
+    color: #ffffff;
+    border-color: rgba(124, 110, 245, 0.45);
+}
+#NoteEditor {
+    background-color: rgba(252, 196, 88, 0.05);
+    color: rgba(255, 240, 215, 0.96);
+    border: 1px solid rgba(252, 196, 88, 0.20);
+    border-left: 3px solid rgba(252, 188, 64, 0.78);
+    border-radius: 10px;
+    padding: 12px;
+    selection-background-color: rgba(124, 110, 245, 0.32);
+}
+#NotePreview {
+    background-color: rgba(246, 246, 250, 0.03);
+    color: rgba(246, 246, 250, 0.96);
+    border: 1px solid rgba(240, 240, 248, 0.08);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 13px;
+}
+#EditorCancelBtn {
+    background-color: rgba(246, 246, 250, 0.06);
+    color: rgba(246, 246, 250, 0.78);
+    border: 1px solid rgba(240, 240, 248, 0.12);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+}
+#EditorCancelBtn:hover { background-color: rgba(246, 246, 250, 0.10); }
+
+/* Hover-revealed action bar on AI bubbles (copy + regenerate) */
+#BubbleActionBar {
+    background-color: rgba(28, 26, 44, 0.96);
+    border: 1px solid rgba(240, 240, 248, 0.18);
+    border-radius: 9px;
+}
+#BubbleActionBtn {
+    background-color: transparent;
+    color: rgba(246, 246, 250, 0.85);
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    padding: 0;
+}
+#BubbleActionBtn:hover {
+    background-color: rgba(124, 110, 245, 0.28);
+    color: #ffffff;
+}
+
 /* Saved-note bubble — warm amber sticky-note treatment */
 #BubbleNote {
     background-color: rgba(252, 196, 88, 0.08);

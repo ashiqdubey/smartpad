@@ -73,6 +73,9 @@ class Note(Base):
     )
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Sticky-note tint: hex like "#fcc458" (amber default) or one of the
+    # palette names: "amber" | "yellow" | "pink" | "blue" | "mint" | "purple"
+    color: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_level_applied: Mapped[int | None] = mapped_column(Integer, nullable=True)
     grammar_fixed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     enhanced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

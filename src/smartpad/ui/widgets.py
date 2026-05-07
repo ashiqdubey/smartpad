@@ -354,9 +354,32 @@ class HourSlider(QWidget):
 NOTE_AMBER = QColor(252, 188, 64)        # warm amber accent
 NOTE_AMBER_GLOW = QColor(252, 188, 64, 38)
 
+# Sticky-note palette — name → QColor (the accent edge / glyph tint).
+# Card backgrounds are these at 22% alpha, see NoteCard.paintEvent.
+NOTE_PALETTE: dict[str, QColor] = {
+    "amber":  QColor(252, 188, 64),    # default
+    "yellow": QColor(245, 220, 96),
+    "pink":   QColor(241, 128, 184),
+    "blue":   QColor(96, 165, 250),
+    "mint":   QColor(80, 220, 170),
+    "green":  QColor(120, 210, 120),
+    "purple": QColor(176, 140, 255),
+}
+
+
+def palette_color(name: str | None) -> QColor:
+    """Resolve a palette name (or hex string) to QColor; default → amber."""
+    if not name:
+        return QColor(NOTE_AMBER)
+    if name.startswith("#"):
+        return QColor(name)
+    return QColor(NOTE_PALETTE.get(name, NOTE_AMBER))
+
 
 class NoteCard(QWidget):
     """Sticky-note style card — warm amber tint, accent left bar, glyph + meta + content."""
+
+    color_changed = pyqtSignal(str)  # palette name when user picks a colour
 
     def __init__(
         self,
@@ -364,13 +387,15 @@ class NoteCard(QWidget):
         when: str = "",
         glyph: str = "✎",
         accent: QColor | None = None,
+        color_name: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._content = content
         self._when = when
         self._glyph = glyph
-        self._accent = QColor(accent) if accent else QColor(NOTE_AMBER)
+        self._color_name = color_name or "amber"
+        self._accent = QColor(accent) if accent else palette_color(self._color_name)
         self.setMinimumHeight(78)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
@@ -393,6 +418,17 @@ class NoteCard(QWidget):
         kicker_row.addWidget(meta)
         kicker_row.addStretch()
 
+        # Colour-pick button — opens the palette popover
+        from PyQt6.QtWidgets import QPushButton  # noqa: PLC0415
+        self._palette_btn = QPushButton("●")
+        self._palette_btn.setObjectName("NoteColorButton")
+        self._palette_btn.setFixedSize(QSize(20, 20))
+        self._palette_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._palette_btn.setToolTip("Change colour")
+        self._palette_btn.clicked.connect(self._show_palette)
+        self._sync_palette_button()
+        kicker_row.addWidget(self._palette_btn)
+
         outer.addLayout(kicker_row)
 
         truncated = content if len(content) <= 240 else content[:237] + "…"
@@ -402,6 +438,65 @@ class NoteCard(QWidget):
         text.setMinimumWidth(0)
         text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(text)
+
+    def _sync_palette_button(self) -> None:
+        """Tint the palette button to match the current colour."""
+        c = self._accent
+        self._palette_btn.setStyleSheet(
+            f"#NoteColorButton {{ color: rgba({c.red()},{c.green()},{c.blue()},230); "
+            f"background-color: rgba({c.red()},{c.green()},{c.blue()},38); "
+            f"border: 1px solid rgba({c.red()},{c.green()},{c.blue()},120); "
+            f"border-radius: 10px; font-size: 13px; padding: 0; }}"
+            f"#NoteColorButton:hover {{ background-color: rgba({c.red()},{c.green()},{c.blue()},70); }}"
+        )
+
+    def _show_palette(self) -> None:
+        """Pop a small palette of swatches anchored under the button."""
+        from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QFrame  # noqa: PLC0415
+        popover = QFrame(self.window() or self)
+        popover.setObjectName("NotePalettePopover")
+        popover.setFrameShape(QFrame.Shape.NoFrame)
+        popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        # Make the popover float as a tooltip-ish window
+        popover.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        popover.setStyleSheet(
+            "#NotePalettePopover { background-color: rgba(28, 26, 44, 0.98);"
+            " border: 1px solid rgba(240, 240, 248, 0.18); border-radius: 10px; }"
+        )
+        row = QHBoxLayout(popover)
+        row.setContentsMargins(6, 6, 6, 6)
+        row.setSpacing(4)
+
+        def _make_swatch(name: str, c: QColor) -> QPushButton:
+            btn = QPushButton()
+            btn.setFixedSize(QSize(22, 22))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(name.title())
+            border = "rgba(255,255,255,0.55)" if name == self._color_name else "rgba(255,255,255,0.18)"
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: rgba({c.red()},{c.green()},{c.blue()},230); "
+                f"border: 2px solid {border}; border-radius: 11px; }}"
+                f"QPushButton:hover {{ border: 2px solid rgba(255,255,255,0.85); }}"
+            )
+            btn.clicked.connect(lambda _=False, n=name: self._pick_colour(n, popover))
+            return btn
+
+        for name, c in NOTE_PALETTE.items():
+            row.addWidget(_make_swatch(name, c))
+
+        # Position under the palette button
+        gp = self._palette_btn.mapToGlobal(self._palette_btn.rect().bottomLeft())
+        popover.adjustSize()
+        popover.move(gp.x() - popover.width() + self._palette_btn.width(), gp.y() + 4)
+        popover.show()
+
+    def _pick_colour(self, name: str, popover: QWidget) -> None:
+        self._color_name = name
+        self._accent = palette_color(name)
+        self._sync_palette_button()
+        self.update()
+        self.color_changed.emit(name)
+        popover.close()
 
     def paintEvent(self, event: object) -> None:  # noqa: N802
         p = QPainter(self)
