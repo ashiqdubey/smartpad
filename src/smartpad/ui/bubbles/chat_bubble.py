@@ -236,10 +236,22 @@ class ChatBubble(BubbleBase):
         if hasattr(self, "_actions") and self._actions.isVisible():
             self._reposition_actions()
 
+    def showEvent(self, event: object) -> None:  # noqa: N802
+        super().showEvent(event)  # type: ignore[arg-type]
+        # Re-measure once the widget is on-screen — by now the QSS font is
+        # actually applied and QFontMetrics returns correct widths.
+        QTimer.singleShot(0, self._fit_label_to_content)
+
     def _fit_label_to_content(self) -> None:
         """Size the bubble to its text — shrink for short messages, wrap for
         long ones. Uses QFontMetrics to find the natural unwrapped width and
-        chooses between fit-to-content vs fixed-max-with-wrap."""
+        chooses between fit-to-content vs fixed-max-with-wrap.
+
+        QFontMetrics can under-estimate when called before QSS has applied
+        the actual font (especially during construction), so we add a
+        generous buffer to avoid the "vertical sliver" failure mode where
+        a 2-char message gets force-wrapped to one char per line.
+        """
         if self.width() <= 120:
             return
         bubble_max = max(140, int(self.width() * 0.72))
@@ -250,21 +262,26 @@ class ChatBubble(BubbleBase):
         text = self._base_text or " "
         longest = 0
         for line in text.split("\n"):
-            line_w = fm.horizontalAdvance(line)
-            if line_w > longest:
-                longest = line_w
+            # boundingRect is more accurate than horizontalAdvance for the
+            # actual rendered glyph width, including italics + accents.
+            br = fm.boundingRect(line)
+            if br.width() > longest:
+                longest = br.width()
 
-        if longest <= label_max:
-            # Text fits without wrapping — shrink the bubble to it.
-            target = max(20, longest + 6)
+        # Generous buffer: 20px guaranteed + 15% of measured width.
+        # Compensates for font-substitution differences between QFontMetrics
+        # at __init__ time vs the QSS font that's actually rendered.
+        buffered = int(longest * 1.15) + 20
+
+        if buffered <= label_max:
+            target = max(60, buffered)  # never narrower than 60px
             self._label.setMaximumWidth(target)
             self._label.setFixedWidth(target)
-            # Single-ish line height; heightForWidth handles explicit \n.
             hfw = self._label.heightForWidth(target)
             if hfw > 0:
                 self._label.setMinimumHeight(hfw)
         else:
-            # Text would overflow — fix at the cap and let wordWrap fire.
+            # Long enough to need wrapping — pin at the max.
             self._label.setMaximumWidth(label_max)
             self._label.setFixedWidth(label_max)
             hfw = self._label.heightForWidth(label_max)
