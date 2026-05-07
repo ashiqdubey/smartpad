@@ -14,7 +14,14 @@ Status dot: tiny circle top-right (saving -> saved -> error).
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFontMetrics,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -25,6 +32,68 @@ from PyQt6.QtWidgets import (
 )
 
 from smartpad.ui.bubbles.base import BubbleBase
+
+
+class _BubbleFrame(QWidget):
+    """Bubble background painted directly with QPainter — bypasses QSS so
+    light/dark theme confusion can't make text-on-text invisible.
+
+    User bubbles get a violet vertical gradient with iMessage-tail corners.
+    AI bubbles get a solid dark grey (#3a3a41) with subtle border.
+    """
+
+    def __init__(self, is_user: bool, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._is_user = is_user
+        # Background still wins — make sure we're not drawing translucent
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+    def paintEvent(self, event: object) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+
+        path = QPainterPath()
+        if self._is_user:
+            # iMessage user bubble — tail at bottom-right (5px), others 18px
+            path.moveTo(18.0, 0.0)
+            path.lineTo(w - 18.0, 0.0)
+            path.quadTo(w, 0.0, w, 18.0)
+            path.lineTo(w, h - 5.0)
+            path.quadTo(w, h, w - 5.0, h)
+            path.lineTo(18.0, h)
+            path.quadTo(0.0, h, 0.0, h - 18.0)
+            path.lineTo(0.0, 18.0)
+            path.quadTo(0.0, 0.0, 18.0, 0.0)
+
+            grad = QLinearGradient(0.0, 0.0, 0.0, h)
+            grad.setColorAt(0.0, QColor("#9587ff"))
+            grad.setColorAt(0.55, QColor("#7c6ef5"))
+            grad.setColorAt(1.0, QColor("#6557d8"))
+            p.fillPath(path, QBrush(grad))
+
+            # Top highlight + bottom shadow strokes for the "raised" feel
+            p.setPen(QColor(255, 255, 255, 56))
+            p.drawLine(8, 1, int(w) - 8, 1)
+        else:
+            # AI bubble — tail at bottom-left (5px), others 18px
+            path.moveTo(18.0, 0.0)
+            path.lineTo(w - 18.0, 0.0)
+            path.quadTo(w, 0.0, w, 18.0)
+            path.lineTo(w, h - 18.0)
+            path.quadTo(w, h, w - 18.0, h)
+            path.lineTo(5.0, h)
+            path.quadTo(0.0, h, 0.0, h - 5.0)
+            path.lineTo(0.0, 18.0)
+            path.quadTo(0.0, 0.0, 18.0, 0.0)
+
+            p.fillPath(path, QColor(58, 58, 65, 235))
+            # Subtle border + top highlight
+            p.setPen(QColor(255, 255, 255, 26))
+            p.drawPath(path)
+            p.setPen(QColor(255, 255, 255, 42))
+            p.drawLine(8, 1, int(w) - 8, 1)
+        p.end()
 
 
 class ChatBubble(BubbleBase):
@@ -118,16 +187,18 @@ class ChatBubble(BubbleBase):
         if is_user:
             self._content_layout.addStretch()
 
-        self._bubble_frame = QWidget(self._content_widget)
+        # Custom-painted bubble — guaranteed to render correctly regardless
+        # of theme, QSS load order, or per-widget stylesheet propagation.
+        self._bubble_frame = _BubbleFrame(is_user, self._content_widget)
         self._bubble_frame.setObjectName("BubbleUser" if is_user else "BubbleAI")
-        # Apply inline QSS that beats anything set at the app level
-        self._bubble_frame.setStyleSheet(self._USER_QSS if is_user else self._AI_QSS)
         self._bubble_frame.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
 
+        # Real padding via Qt layout (not QSS) so it applies even if the
+        # stylesheet isn't loaded for any reason.
         inner = QHBoxLayout(self._bubble_frame)
-        inner.setContentsMargins(0, 0, 0, 0)  # QSS padding (10/14) takes over
+        inner.setContentsMargins(13, 7, 13, 7)
         inner.setSpacing(0)
 
         self._label = QLabel()
@@ -303,7 +374,7 @@ class ChatBubble(BubbleBase):
             return
         bubble_max = max(140, int(self.width() * 0.72))
         self._bubble_frame.setMaximumWidth(bubble_max)
-        label_max = max(80, bubble_max - 30)  # 13px QSS padding × 2 + 4px slack
+        label_max = max(80, bubble_max - 30)  # 13px layout padding × 2 + 4px slack
 
         fm = QFontMetrics(self._label.font())
         text = self._base_text or " "
