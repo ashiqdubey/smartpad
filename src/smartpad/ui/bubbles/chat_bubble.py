@@ -64,38 +64,39 @@ class ChatBubble(BubbleBase):
     def _build_ui(self) -> None:
         is_user = self._role == "user"
 
-        # Off-side gutter via Qt layout (NOT QSS) — this is what actually
-        # constrains the bubble so wordWrap fires reliably.
-        self._content_layout.setContentsMargins(
-            56 if is_user else 6,  # left
-            0,
-            6 if is_user else 56,  # right
-            0,
-        )
+        # Small symmetric outer gutter — the off-side push comes from
+        # addStretch(), not from a giant content margin. Stretch works
+        # reliably; large left/right margins were causing the bubble
+        # itself to be sized too wide and overflow on narrow panels.
+        self._content_layout.setContentsMargins(8, 0, 8, 0)
 
         if is_user:
             self._content_layout.addStretch()
 
         self._bubble_frame = QWidget(self._content_widget)
         self._bubble_frame.setObjectName("BubbleUser" if is_user else "BubbleAI")
-        # Maximum: prefer sizeHint but cap at maxWidth so layout shrinks the bubble
         self._bubble_frame.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
 
         inner = QHBoxLayout(self._bubble_frame)
-        inner.setContentsMargins(2, 0, 2, 0)
+        inner.setContentsMargins(0, 0, 0, 0)  # QSS padding (10/14) takes over
         inner.setSpacing(0)
 
         self._label = QLabel()
         self._label.setWordWrap(True)
-        self._label.setMinimumWidth(0)  # critical: lets it shrink for wrap
+        self._label.setMinimumWidth(0)
+        # PlainText: respect the user's newlines (Shift+Enter) AND avoid the
+        # default rich-text mode interpreting "<" / "&" / etc. as markup.
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self._label.setSizePolicy(
-            QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding
         )
+        # Critical: align top so multi-line content renders from the top down.
+        self._label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         inner.addWidget(self._label)
 
         self._content_layout.addWidget(self._bubble_frame)
@@ -162,8 +163,14 @@ class ChatBubble(BubbleBase):
 
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
-        if self.width() > 100:
-            # Reserve ~62px for the off-side gutter + small breathing room.
-            # The remaining width caps the bubble — wordWrap fires inside.
-            available = self.width() - 62 - 8
-            self._bubble_frame.setMaximumWidth(max(120, available))
+        if self.width() > 120:
+            # Bubble takes at most 78% of the chat area width; remaining 22%
+            # forms the visual off-side gutter (via addStretch on one side).
+            bubble_max = max(140, int(self.width() * 0.78))
+            self._bubble_frame.setMaximumWidth(bubble_max)
+            # CRITICAL: also constrain the QLabel directly. QLabel.wordWrap
+            # only fires when the label's own width is finite — propagating
+            # via the QHBoxLayout alone isn't enough on every Qt build.
+            # Account for QSS padding (10px top/bottom, 14px left/right) +
+            # inner layout margins (0). The horizontal padding totals 28px.
+            self._label.setMaximumWidth(max(80, bubble_max - 32))
